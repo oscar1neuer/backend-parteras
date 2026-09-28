@@ -148,3 +148,87 @@ app.post('/api/v1/calendario-nino', async (req, res) => {
     res.status(500).json({ error: 'Error interno al guardar el registro del niño' });
   }
 });
+
+// 5. Registrar Calendario de Atención a la Mujer
+app.post('/api/v1/calendario-mujer', async (req, res) => {
+  try {
+    const {
+      parteraId,
+      datosUsuaria,
+      controlPrenatal,
+      embarazoComplicaciones,
+      complicacionesHemorragicas,
+      partoNormal,
+      partoComplicado,
+      puerperio,
+      alertaMuerteMaterna,
+      cierreAdministrativo
+    } = req.body;
+
+    const query = `
+      INSERT INTO calendario_mujer (
+        partera_id,
+        nombre_mujer, edad, fecha_consulta, localidad, municipio,
+        mes_embarazo_activo, acido_folico_entregado, sulfato_ferroso_entregado, vacuna_tetanos, muac_embarazo,
+        embarazo_referido, sintomas_embarazo,
+        aborto_dolor_hemorragia_referido, complicaciones_hemorragicas,
+        tipo_parto_normal, resultado_parto_normal,
+        parto_complicado_referido, resultado_parto_complicado,
+        muac_puerperio, puerperio_complicado_referido, sintomas_puerperio,
+        muerte_materna_registrada, etapa_muerte_materna,
+        mes_informado, nombre_supervisor, centro_salud_adscripcion, huella_firmada
+      ) VALUES (
+        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28
+      )
+      RETURNING id, partera_id, creado_en;
+    `;
+
+    const values = [
+      parteraId || null,
+      datosUsuaria?.nombreMujer,
+      datosUsuaria?.edad,
+      datosUsuaria?.fechaConsulta,
+      datosUsuaria?.localidad,
+      datosUsuaria?.municipio,
+      controlPrenatal?.mesEmbarazoActivo,
+      controlPrenatal?.acidoFolicoEntregado || false,
+      controlPrenatal?.sulfatoFerrosoEntregado || false,
+      controlPrenatal?.vacunaTetanos,
+      controlPrenatal?.muacEmbarazo,
+      embarazoComplicaciones?.referido || false,
+      embarazoComplicaciones?.sintomas || [],
+      complicacionesHemorragicas?.referido || false,
+      complicacionesHemorragicas?.complicaciones || [],
+      partoNormal?.tipoParto,
+      partoNormal?.resultado,
+      partoComplicado?.referido || false,
+      partoComplicado?.resultado,
+      puerperio?.muacPuerperio,
+      puerperio?.complicadoReferido || false,
+      puerperio?.sintomas || [],
+      alertaMuerteMaterna?.registrada || false,
+      alertaMuerteMaterna?.etapa,
+      cierreAdministrativo?.mesInformado,
+      cierreAdministrativo?.nombreSupervisor,
+      cierreAdministrativo?.centroSaludAdscripcion,
+      cierreAdministrativo?.huellaFirmada || false
+    ];
+
+    const result = await pool.query(query, values);
+    const nuevoRegistro = result.rows[0];
+
+    res.status(201).json({
+      success: true,
+      message: 'Calendario de atención a la mujer registrado correctamente',
+      data: {
+        id: nuevoRegistro.id,
+        folioOficial: `CAL-MUJER-2026-${String(nuevoRegistro.id).slice(0, 4).toUpperCase()}`,
+        parteraId: nuevoRegistro.partera_id,
+        creadoEn: nuevoRegistro.creado_en
+      }
+    });
+  } catch (error) {
+    console.error('Error al registrar calendario:', error);
+    res.status(500).json({ error: 'Error interno al guardar en la base de datos' });
+  }
+});
