@@ -232,3 +232,132 @@ app.post('/api/v1/calendario-mujer', async (req, res) => {
     res.status(500).json({ error: 'Error interno al guardar en la base de datos' });
   }
 });
+
+// ==========================================
+// MÓDULO ADMINISTRATIVO (Jurisdicción Sanitaria No. 2)
+// ==========================================
+
+// A. Catálogo de Unidades Médicas CLUES
+app.get('/api/v1/admin/unidades-medicas', async (_req, res) => {
+  try {
+    const result = await pool.query('SELECT * FROM unidades_medicas ORDER BY nombre_unidad ASC');
+    res.status(200).json(result.rows);
+  } catch (error) {
+    console.error('Error al obtener unidades médicas:', error);
+    res.status(500).json({ error: 'Error al consultar unidades médicas' });
+  }
+});
+
+app.post('/api/v1/admin/unidades-medicas', async (req, res) => {
+  try {
+    const { claveClues, nombreUnidad, municipio, localidadAgencia, tipoEstablecimiento } = req.body;
+    const query = `
+      INSERT INTO unidades_medicas (clave_clues, nombre_unidad, municipio, localidad_agencia, tipo_establecimiento)
+      VALUES ($1, $2, $3, $4, $5)
+      RETURNING id, clave_clues, nombre_unidad, estado;
+    `;
+    const values = [claveClues, nombreUnidad, municipio, localidadAgencia || null, tipoEstablecimiento];
+    const result = await pool.query(query, values);
+    
+    res.status(201).json({
+      success: true,
+      message: 'Unidad Médica registrada correctamente en el catálogo CLUES',
+      data: result.rows[0]
+    });
+  } catch (error) {
+    console.error('Error al registrar unidad médica:', error);
+    res.status(500).json({ error: 'Error al registrar la unidad médica' });
+  }
+});
+
+// B. Gestión de Usuarios Institucionales SSO
+app.get('/api/v1/admin/usuarios-sso', async (_req, res) => {
+  try {
+    const result = await pool.query('SELECT * FROM usuarios_sso ORDER BY creado_en DESC');
+    res.status(200).json(result.rows);
+  } catch (error) {
+    console.error('Error al listar usuarios SSO:', error);
+    res.status(500).json({ error: 'Error al consultar usuarios institucionales' });
+  }
+});
+
+app.post('/api/v1/admin/usuarios-sso', async (req, res) => {
+  try {
+    const { nombre, apellidoPaterno, apellidoMaterno, curp, correoInstitucional, telefono, rol, unidadMedicaId, municipio } = req.body;
+    const query = `
+      INSERT INTO usuarios_sso (nombre, apellido_paterno, apellido_materno, curp, correo_institucional, telefono, rol, unidad_medica_id, municipio)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+      RETURNING id, correo_institucional, rol, estado;
+    `;
+    const values = [nombre, apellidoPaterno, apellidoMaterno, curp, correoInstitucional, telefono || null, rol, unidadMedicaId || null, municipio];
+    const result = await pool.query(query, values);
+
+    res.status(201).json({
+      success: true,
+      message: 'Cuenta de servidor público creada exitosamente',
+      data: result.rows[0]
+    });
+  } catch (error) {
+    console.error('Error al registrar usuario SSO:', error);
+    res.status(500).json({ error: 'Error al crear la cuenta institucional' });
+  }
+});
+
+// C. Acreditación de Parteras Tradicionales
+app.get('/api/v1/admin/parteras', async (_req, res) => {
+  try {
+    const result = await pool.query('SELECT * FROM parteras ORDER BY nombre ASC');
+    res.status(200).json(result.rows);
+  } catch (error) {
+    console.error('Error al listar parteras:', error);
+    res.status(500).json({ error: 'Error al consultar padrón de parteras' });
+  }
+});
+
+app.post('/api/v1/admin/parteras', async (req, res) => {
+  try {
+    const { nombre, apellidoPaterno, apellidoMaterno, curp, lenguaMaterna, telefonoRecaudo, municipio, comunidadBarrio, unidadMedicaAdscritaId, pinAcceso } = req.body;
+    const query = `
+      INSERT INTO parteras (nombre, apellido_paterno, apellido_materno, curp, lengua_materna, telefono_recaudo, municipio, comunidad_barrio, unidad_medica_adscrita_id, pin_acceso, estado_acreditacion)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'ACREDITADA')
+      RETURNING id, nombre, apellido_paterno, estado_acreditacion;
+    `;
+    const values = [nombre, apellidoPaterno, apellidoMaterno, curp, lenguaMaterna, telefonoRecaudo, municipio, comunidadBarrio, unidadMedicaAdscritaId || null, pinAcceso || '0000'];
+    const result = await pool.query(query, values);
+
+    res.status(201).json({
+      success: true,
+      message: 'Partera tradicional acreditada exitosamente',
+      data: result.rows[0]
+    });
+  } catch (error) {
+    console.error('Error al registrar partera:', error);
+    res.status(500).json({ error: 'Error al acreditar partera tradicional' });
+  }
+});
+
+// D. Responder Contrareferencia Médica
+app.put('/api/v1/admin/referencias/:id/contrareferencia', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { medicoAtendio, unidadAtencionId, diagnosticoOficial, conductaMedica, estatus } = req.body;
+
+    // Nota: Asegúrate de tener las columnas correspondientes en la tabla contrareferencias o en hojas_referencia
+    const query = `
+      INSERT INTO contrareferencias (hoja_referencia_id, medico_atendio, unidad_atencion_id, diagnostico_oficial, conducta_medica, estatus, fecha_respuesta)
+      VALUES ($1, $2, $3, $4, $5, $6, NOW())
+      RETURNING id, estatus;
+    `;
+    const values = [id, medicoAtendio, unidadAtencionId || null, diagnosticoOficial, conductaMedica, estatus || 'CONTRAREFERIDO'];
+    const result = await pool.query(query, values);
+
+    res.status(200).json({
+      success: true,
+      message: 'Contrareferencia médica guardada y enviada correctamente',
+      data: result.rows[0]
+    });
+  } catch (error) {
+    console.error('Error al responder contrareferencia:', error);
+    res.status(500).json({ error: 'Error al procesar la contrareferencia médica' });
+  }
+});
