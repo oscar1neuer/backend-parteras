@@ -361,3 +361,107 @@ app.put('/api/v1/admin/referencias/:id/contrareferencia', async (req, res) => {
     res.status(500).json({ error: 'Error al procesar la contrareferencia médica' });
   }
 });
+
+// ==========================================
+// MÓDULO CAPTURISTA DE TAMIZ NEONATAL
+// ==========================================
+
+// 1. Registrar Muestra de Tamiz Neonatal (Tarjeta Guthrie)
+app.post('/api/tamiz/muestras', async (req, res) => {
+  try {
+    const {
+      folio_tarjeta,
+      clues_unidad,
+      unidad_medica_nombre,
+      responsable_toma_nombre,
+      tecnica_toma,
+      tecnica_toma_especificar,
+      rn_nombres,
+      rn_apellido_paterno,
+      rn_apellido_materno,
+      rn_fecha_nacimiento,
+      rn_fecha_toma_muestra,
+      rn_sexo,
+      rn_edad_gestacional,
+      rn_producto,
+      rn_peso_gramos,
+      rn_talla_cm,
+      rn_malformaciones_congenitas,
+      rn_malformaciones_especificar,
+      rn_condicion_toma,
+      rn_alimentacion,
+      madre_nombres,
+      madre_apellido_paterno,
+      madre_apellido_materno,
+      madre_curp,
+      madre_telefono_celular,
+      madre_telefono_fijo,
+      madre_email,
+      madre_calle_numero,
+      madre_colonia_localidad,
+      madre_municipio,
+      madre_codigo_postal,
+      madre_edad,
+      madre_gestas,
+      madre_antecedente_tiroideo,
+      madre_antecedente_especificar,
+      observaciones_captura
+    } = req.body;
+
+    // Validación de fecha de toma vs fecha de nacimiento
+    if (new Date(rn_fecha_toma_muestra) <= new Date(rn_fecha_nacimiento)) {
+      return res.status(400).json({ error: 'La fecha de toma de muestra debe ser posterior a la fecha de nacimiento' });
+    }
+
+    const query = `
+      INSERT INTO tamiz_muestras (
+        folio_tarjeta, clues_unidad, unidad_medica_nombre, responsable_toma_nombre,
+        tecnica_toma, tecnica_toma_especificar, rn_nombres, rn_apellido_paterno, rn_apellido_materno,
+        rn_fecha_nacimiento, rn_fecha_toma_muestra, rn_sexo, rn_edad_gestacional, rn_producto,
+        rn_peso_gramos, rn_talla_cm, rn_malformaciones_congenitas, rn_malformaciones_especificar,
+        rn_condicion_toma, rn_alimentacion, madre_nombres, madre_apellido_paterno, madre_apellido_materno,
+        madre_curp, madre_telefono_celular, madre_telefono_fijo, madre_email, madre_calle_numero,
+        madre_colonia_localidad, madre_municipio, madre_codigo_postal, madre_edad, madre_gestas,
+        madre_antecedente_tiroideo, madre_antecedente_especificar, observaciones_captura
+      ) VALUES (
+        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20,
+        $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36
+      ) RETURNING id, folio_tarjeta, estatus_muestra, created_at;
+    `;
+
+    const values = [
+      folio_tarjeta, clues_unidad, unidad_medica_nombre, responsable_toma_nombre,
+      tecnica_toma, tecnica_toma_especificar || null, rn_nombres || 'RN', rn_apellido_paterno, rn_apellido_materno,
+      rn_fecha_nacimiento, rn_fecha_toma_muestra, rn_sexo, rn_edad_gestacional, rn_producto,
+      rn_peso_gramos, rn_talla_cm, rn_malformaciones_congenitas || false, rn_malformaciones_especificar || null,
+      rn_condicion_toma, rn_alimentacion, madre_nombres, madre_apellido_paterno, madre_apellido_materno,
+      madre_curp, madre_telefono_celular, madre_telefono_fijo || null, madre_email || null, madre_calle_numero,
+      madre_colonia_localidad, madre_municipio, madre_codigo_postal || null, madre_edad, madre_gestas,
+      madre_antecedente_tiroideo || false, madre_antecedente_especificar || null, observaciones_captura || null
+    ];
+
+    const result = await pool.query(query, values);
+    res.status(201).json({
+      success: true,
+      message: 'Muestra de Tamiz Neonatal registrada correctamente',
+      data: result.rows[0]
+    });
+  } catch (error: any) {
+    if (error.code === '23505') { // Error de unicidad en PostgreSQL
+      return res.status(409).json({ error: 'El folio de tarjeta especificado ya existe en el sistema' });
+    }
+    console.error('Error al registrar muestra de tamiz:', error);
+    res.status(500).json({ error: 'Error interno al guardar la muestra en la base de datos' });
+  }
+});
+
+// 2. Obtener Historial de Muestras Capturadas
+app.get('/api/tamiz/muestras', async (_req, res) => {
+  try {
+    const result = await pool.query('SELECT * FROM tamiz_muestras ORDER BY created_at DESC');
+    res.status(200).json(result.rows);
+  } catch (error) {
+    console.error('Error al obtener muestras de tamiz:', error);
+    res.status(500).json({ error: 'Error al consultar las muestras de tamiz' });
+  }
+});
