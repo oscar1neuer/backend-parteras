@@ -465,3 +465,158 @@ app.get('/api/tamiz/muestras', async (_req, res) => {
     res.status(500).json({ error: 'Error al consultar las muestras de tamiz' });
   }
 });
+
+// ==========================================
+// MÓDULO MÉDICO Y CONTRAREFERENCIAS (SSO)
+// ==========================================
+
+// PESTAÑA 1: CASOS PRIORITARIOS Y TAMIZ RECALL
+app.get('/api/medico/tamiz/casos-prioritarios', async (_req, res) => {
+  try {
+    const result = await pool.query('SELECT * FROM tamiz_casos_prioritarios WHERE estatus_resultado = $1 ORDER BY creado_en DESC', ['RESULTADO_SOSPECHOSO']);
+    res.status(200).json(result.rows);
+  } catch (error) {
+    console.error('Error al obtener casos prioritarios:', error);
+    res.status(500).json({ error: 'Error al consultar casos prioritarios de tamiz' });
+  }
+});
+
+app.post('/api/medico/tamiz/solicitar-segunda-muestra', async (req, res) => {
+  try {
+    const { folioGuthrie, fechaTomaVenosa, tipoMuestra, numeroTuboTarjeta, laboratorioDestino, tecnicoPuncion, observaciones } = req.body;
+    const query = `
+      UPDATE tamiz_casos_prioritarios 
+      SET fecha_toma_venosa = $1, tipo_muestra = $2, numero_tubo_tarjeta = $3, laboratorio_destino = $4, tecnico_puncion = $5, observaciones_segunda_muestra = $6
+      WHERE folio_guthrie = $7
+      RETURNING folio_guthrie, estatus_resultado;
+    `;
+    const values = [fechaTomaVenosa, tipoMuestra, numeroTuboTarjeta, laboratorioDestino, tecnicoPuncion, observaciones, folioGuthrie];
+    const result = await pool.query(query, values);
+    
+    res.status(200).json({ success: true, message: 'Solicitud de segunda muestra registrada correctamente', data: result.rows[0] });
+  } catch (error) {
+    console.error('Error al registrar segunda muestra:', error);
+    res.status(500).json({ error: 'Error al registrar la solicitud de segunda muestra' });
+  }
+});
+
+app.post('/api/medico/tamiz/confirmar-diagnostico', async (req, res) => {
+  try {
+    const { folioGuthrie, diagnosticoCIE10, descripcionDiagnostico, esquemaTerapeutico, fechaInicioTratamiento, medicoTratante, altaTratamiento } = req.body;
+    const query = `
+      UPDATE tamiz_casos_prioritarios 
+      SET diagnostico_cie10 = $1, descripcion_diagnostico = $2, esquema_terapeutico = $3, fecha_inicio_tratamiento = $4, medico_tratante = $5, alta_tratamiento = $6, estatus_resultado = 'DIAGNOSTICO_CONFIRMADO'
+      WHERE folio_guthrie = $7
+      RETURNING folio_guthrie, diagnostico_cie10, alta_tratamiento;
+    `;
+    const values = [diagnosticoCIE10, descripcionDiagnostico, esquemaTerapeutico, fechaInicioTratamiento, medicoTratante, altaTratamiento || false, folioGuthrie];
+    const result = await pool.query(query, values);
+
+    res.status(200).json({ success: true, message: 'Diagnóstico confirmado y esquema terapéutico guardado', data: result.rows[0] });
+  } catch (error) {
+    console.error('Error al confirmar diagnóstico:', error);
+    res.status(500).json({ error: 'Error al guardar el diagnóstico definitivo' });
+  }
+});
+
+// PESTAÑA 2: EXPEDIENTE DIGITAL CARNÉ PERINATAL (CLAP)
+app.get('/api/medico/perinatales/pacientes-activas', async (_req, res) => {
+  try {
+    const result = await pool.query('SELECT expediente_id AS "expedienteId", nombre, curp, telefono, riesgo_aro AS "riesgoARO" FROM expedientes_perinatales ORDER BY nombre ASC');
+    res.status(200).json(result.rows);
+  } catch (error) {
+    console.error('Error al listar pacientes activas:', error);
+    res.status(500).json({ error: 'Error al consultar embarazadas activas' });
+  }
+});
+
+app.get('/api/medico/perinatales/expediente/:expedienteId', async (req, res) => {
+  try {
+    const { expedienteId } = req.params;
+    const expResult = await pool.query('SELECT * FROM expedientes_perinatales WHERE expediente_id = $1', [expedienteId]);
+    if (expResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Expediente perinatal no encontrado' });
+    }
+    const consultasResult = await pool.query('SELECT id, TO_CHAR(fecha, \'YYYY-MM-DD\') AS fecha, edad_gestacional AS "edadGestacional", peso_madre_kg AS "pesoMadreKg", presion_arterial AS "presionArterial", altura_uterina_fr AS "alturaUterinaFr", fcf_lpm AS "fcfLpm", edema, observaciones FROM consultas_antenatales WHERE expediente_id = $1 ORDER BY fecha ASC', [expedienteId]);
+
+    const row = expResult.rows[0];
+    res.status(200).json({
+      expedienteId: row.expediente_id,
+      paciente: {
+        nombre: row.nombre,
+        curp: row.curp,
+        fumFecha: row.fum_fecha,
+        fppFecha: row.fpp_fecha,
+        edadGestacionalInicioControl: row.edad_gestacional_inicio,
+        pesoPregestacionalKg: row.peso_pregestacional_kg,
+        tallaCm: row.talla_cm
+      },
+      antecedentes: row.antecedentes_familiares ? {
+        familiares: row.antecedentes_familiares,
+        personales: row.antecedentes_personales,
+        obstetricos: row.antecedentes_obstetricos
+      } : null,
+      gestacionActual: row.gestacion_actual || {},
+      consultasAntenatales: consultasResult.rows,
+      partoPuerperio: row.parto_puerperio || { estado: "PENDIENTE" }
+    });
+  } catch (error) {
+    console.error('Error al obtener expediente perinatal:', error);
+    res.status(500).json({ error: 'Error al consultar el expediente perinatal' });
+  }
+});
+
+app.post('/api/medico/perinatales/expediente/:expedienteId/consultas', async (req, res) => {
+  try {
+    const { expedienteId } = req.params;
+    const { fecha, edadGestacional, pesoMadreKg, presionArterial, alturaUterinaFr, fcfLpm, edema, observaciones } = req.body;
+    const query = `
+      INSERT INTO consultas_antenatales (expediente_id, fecha, edad_gestacional, peso_madre_kg, presion_arterial, altura_uterina_fr, fcf_lpm, edema, observaciones)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+      RETURNING id, fecha;
+    `;
+    const values = [expedienteId, fecha, edadGestacional, pesoMadreKg, presionArterial, alturaUterinaFr || null, fcfLpm || null, edema || null, observaciones || null];
+    const result = await pool.query(query, values);
+
+    res.status(201).json({ success: true, message: 'Consulta prenatal agregada correctamente', data: result.rows[0] });
+  } catch (error) {
+    console.error('Error al agregar consulta prenatal:', error);
+    res.status(500).json({ error: 'Error al registrar la consulta en el expediente' });
+  }
+});
+
+// PESTAÑA 3: CONTRAREFERENCIAS Y RED DE ATENCIÓN
+app.get('/api/medico/contrareferencias/referencias-recibidas', async (_req, res) => {
+  try {
+    const result = await pool.query('SELECT * FROM contrareferencias_medicas WHERE estatus = $1 ORDER BY fecha_recepcion DESC', ['PENDIENTE']);
+    res.status(200).json(result.rows);
+  } catch (error) {
+    console.error('Error al obtener referencias recibidas:', error);
+    res.status(500).json({ error: 'Error al consultar la bandeja de referencias' });
+  }
+});
+
+app.post('/api/medico/contrareferencias/emitir', async (req, res) => {
+  try {
+    const { referenciaId, diagnosticoCIE10, diagnosticoTexto, resumenManejo, planManejo, unidadDestino, medicoEmisor } = req.body;
+    const folioOficial = `CREF-JS2-2026-${Math.floor(1000 + Math.random() * 9000)}`;
+
+    const query = `
+      UPDATE contrareferencias_medicas 
+      SET diagnostico_cie10 = $1, diagnostico_texto = $2, resumen_manejos = $3, plan_manejo = $4, unidad_destino = $5, medico_emisor = $6, folio_oficial = $7, estatus = 'CONTRAREFERIDO', fecha_respuesta = NOW()
+      WHERE referencia_id = $8
+      RETURNING referencia_id, folio_oficial;
+    `;
+    const values = [diagnosticoCIE10, diagnosticoTexto, resumenManejo, planManejo, unidadDestino, medicoEmisor, folioOficial, referenciaId];
+    await pool.query(query, values);
+
+    res.status(200).json({
+      exito: true,
+      folioOficial: folioOficial,
+      mensaje: 'Contrareferencia registrada e impresa correctamente'
+    });
+  } catch (error) {
+    console.error('Error al emitir contrareferencia:', error);
+    res.status(500).json({ error: 'Error al emitir el documento de contrareferencia' });
+  }
+});
