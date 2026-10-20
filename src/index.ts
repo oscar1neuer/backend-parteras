@@ -675,3 +675,115 @@ app.post('/api/v1/auth/login-institucional', async (req, res) => {
     res.status(500).json({ exito: false, message: 'Error interno del servidor' });
   }
 });
+
+// ==========================================
+// MÓDULO RED DE PARTERAS Y HOJAS DE REFERENCIA
+// ==========================================
+
+// 1. Autenticación de Partera por PIN
+app.post('/api/v1/parteras/login-pin', async (req, res) => {
+  try {
+    const { pin } = req.body;
+
+    if (!pin || pin.length !== 4) {
+      return res.status(400).json({ exito: false, mensaje: 'El PIN debe ser de 4 dígitos' });
+    }
+
+    const result = await pool.query(
+      'SELECT * FROM parteras WHERE pin = $1 AND activo = true',
+      [pin]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(401).json({ exito: false, mensaje: 'PIN inválido o partera inactiva' });
+    }
+
+    const partera = result.rows[0];
+    const token = jwt.sign({ id: partera.id, rol: 'PARTERA_TRADICIONAL' }, JWT_SECRET, { expiresIn: '12h' });
+
+    res.status(200).json({
+      token,
+      user: {
+        id: partera.id,
+        nombre: partera.nombre_completo,
+        localidad: partera.localidad,
+        municipio: partera.municipio,
+        rol: 'PARTERA_TRADICIONAL',
+        activo: partera.activo
+      },
+      mensaje: `Bienvenida, ${partera.nombre_completo}`
+    });
+  } catch (error) {
+    console.error('Error en login de partera por PIN:', error);
+    res.status(500).json({ exito: false, mensaje: 'Error interno del servidor' });
+  }
+});
+
+// 2. Registrar Hoja de Referencia (Envío del Formulario)
+app.post('/api/v1/referencias', async (req, res) => {
+  try {
+    const { parteraId, centroSalud, usuaria, motivosReferencia, fechaRegistro } = req.body;
+
+    const query = `
+      INSERT INTO hojas_referencia (
+        partera_id, centro_salud, nombre_usuaria, edad, sexo, 
+        fecha_referencia, localidad_usuaria, municipio_usuaria, motivos_referencia, estado
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, 'PENDIENTE')
+      RETURNING id, estado, creado_en;
+    `;
+
+    const values = [
+      parteraId,
+      centroSalud,
+      usuaria.nombre,
+      usuaria.edad,
+      usuaria.sexo,
+      fechaRegistro || new Date(),
+      usuaria.localidad,
+      usuaria.municipio,
+      JSON.stringify(motivosReferencia)
+    ];
+
+    const result = await pool.query(query, values);
+
+    res.status(201).json({
+      exito: true,
+      mensaje: 'Hoja de referencia registrada correctamente',
+      data: result.rows[0]
+    });
+  } catch (error) {
+    console.error('Error al registrar hoja de referencia:', error);
+    res.status(500).json({ exito: false, mensaje: 'Error al registrar la hoja de referencia en la base de datos' });
+  }
+});
+
+// 3. Responder Contrareferencia Médica
+app.post('/api/v1/referencias/:id/contrareferencia', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { medicoNombre, diagnostico, tratamiento, observacionesPartera } = req.body;
+
+    const insertQuery = `
+      INSERT INTO contrareferencias (hoja_referencia_id, medico_nombre, diagnostico, tratamiento, observaciones_partera)
+      VALUES ($1, $2, $3, $4, $5)
+      RETURNING id, fecha_respuesta;
+    `;
+    const insertValues = [id, medicoNombre, diagnostico, tratamiento, observacionesPartera || null];
+    const contraResult = await pool.query(insertQuery, insertValues);
+
+    // Actualizar el estado de la hoja a CONTRAREFERIDO
+    await pool.query(
+      `UPDATE hojas_referencia SET estado = 'CONTRAREFERIDO' WHERE id = $1`,
+      [id]
+    );
+
+    res.status(200).json({
+      exito: true,
+      mensaje: 'Contrareferencia médica registrada con éxito',
+      data: contraResult.rows[0]
+    });
+  } catch (error) {
+    console.error('Error al registrar contrareferencia:', error);
+    res.status(500).json({ exito: false, mensaje: 'Error al registrar la respuesta médica' });
+  }
+});
