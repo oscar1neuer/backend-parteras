@@ -798,7 +798,15 @@ app.post('/api/v1/clues', async (req, res) => {
       VALUES ($1, $2, $3, $4, $5, $6)
       RETURNING *;
     `;
-    const values = [clues, nombre, municipio, localidad, tipo, estatus];
+    const values = [
+      clues, 
+      nombre, 
+      municipio || null, 
+      localidad || null, 
+      tipo || null, 
+      estatus || 'ACTIVO'
+    ];
+    
     const result = await pool.query(query, values);
 
     res.status(201).json({
@@ -806,8 +814,13 @@ app.post('/api/v1/clues', async (req, res) => {
       mensaje: 'Unidad médica CLUES registrada con éxito',
       data: result.rows[0]
     });
-  } catch (error) {
+
+  } catch (error: any) { // <--- AQUÍ VA EL CÓDIGO QUE TE MANDÓ TU COMPAÑERO
     console.error('Error al registrar CLUES:', error);
-    res.status(500).json({ exito: false, mensaje: 'Error interno al registrar la unidad médica' });
+    res.status(500).json({ 
+      exito: false, 
+      mensaje: 'Error interno al registrar la unidad médica',
+      errorDetalles: error.message // <--- ¡Esto mandará el error real a la pantalla de Kevin!
+    });
   }
 });
