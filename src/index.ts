@@ -793,8 +793,9 @@ app.post('/api/v1/clues', async (req, res) => {
   try {
     const { clues, nombre, municipio, localidad, tipo, estatus } = req.body;
 
+    // Nota que aquí cambiamos 'clues' por 'clave_clues' para que coincida con tu base de datos
     const query = `
-      INSERT INTO unidades_medicas (clues, nombre, municipio, localidad, tipo, estatus)
+      INSERT INTO unidades_medicas (clave_clues, nombre, municipio, localidad, tipo, estatus)
       VALUES ($1, $2, $3, $4, $5, $6)
       RETURNING *;
     `;
@@ -815,12 +816,12 @@ app.post('/api/v1/clues', async (req, res) => {
       data: result.rows[0]
     });
 
-  } catch (error: any) { // <--- AQUÍ VA EL CÓDIGO QUE TE MANDÓ TU COMPAÑERO
+  } catch (error: any) {
     console.error('Error al registrar CLUES:', error);
     res.status(500).json({ 
       exito: false, 
       mensaje: 'Error interno al registrar la unidad médica',
-      errorDetalles: error.message // <--- ¡Esto mandará el error real a la pantalla de Kevin!
+      errorDetalles: error.message 
     });
   }
 });
