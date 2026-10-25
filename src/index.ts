@@ -787,3 +787,27 @@ app.post('/api/v1/referencias/:id/contrareferencia', async (req, res) => {
     res.status(500).json({ exito: false, mensaje: 'Error al registrar la respuesta médica' });
   }
 });
+
+// Registrar Unidad CLUES desde el formulario del Frontend
+app.post('/api/v1/clues', async (req, res) => {
+  try {
+    const { clues, nombre, municipio, localidad, tipo, estatus } = req.body;
+
+    const query = `
+      INSERT INTO unidades_medicas (clues, nombre, municipio, localidad, tipo, estatus)
+      VALUES ($1, $2, $3, $4, $5, $6)
+      RETURNING *;
+    `;
+    const values = [clues, nombre, municipio, localidad, tipo, estatus];
+    const result = await pool.query(query, values);
+
+    res.status(201).json({
+      exito: true,
+      mensaje: 'Unidad médica CLUES registrada con éxito',
+      data: result.rows[0]
+    });
+  } catch (error) {
+    console.error('Error al registrar CLUES:', error);
+    res.status(500).json({ exito: false, mensaje: 'Error interno al registrar la unidad médica' });
+  }
+});
