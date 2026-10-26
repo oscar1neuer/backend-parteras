@@ -789,48 +789,27 @@ app.post('/api/v1/referencias/:id/contrareferencia', async (req, res) => {
 });
 
 // Registrar Unidad CLUES desde el formulario del Frontend
-app.post('/api/v1/clues', async (req, res) => {
+app.get('/api/v1/clues', async (req, res) => {
   try {
-    // Recibimos todas las variantes posibles por seguridad
-    const { 
-      clave_clues, 
-      clues, 
-      nombre, 
-      nombre_unidad, 
-      municipio, 
-      localidad, 
-      tipo_establecimiento, 
-      tipo, 
-      estatus 
-    } = req.body;
-
-    const query = `
-      INSERT INTO unidades_medicas (clave_clues, nombre_unidad, municipio, localidad, tipo_establecimiento, estatus)
-      VALUES ($1, $2, $3, $4, $5, $6)
-      RETURNING *;
-    `;
+    const result = await pool.query('SELECT * FROM unidades_medicas');
     
-    const values = [
-      clave_clues || clues, 
-      nombre_unidad || nombre, 
-      municipio || null, 
-      localidad || null, 
-      tipo_establecimiento || tipo || 'Centro de Salud', 
-      estatus || 'ACTIVO'
-    ];
+    // Mapeamos los campos para asegurarnos de que el frontend los reciba con el nombre exacto
+    const unidadesMapeadas = result.rows.map(row => ({
+      id: row.id || row.id_unidad,
+      nombre: row.nombre || row.nombre_unidad,
+      clues: row.clues || row.clave_clues,
+      municipio: row.municipio,
+      localidad: row.localidad,
+      tipoUnidad: row.tipoUnidad || row.tipo || row.tipo_establecimiento,
+      estatus: row.estatus || 'ACTIVO'
+    }));
 
-    const result = await pool.query(query, values);
-
-    res.status(201).json({
-      exito: true,
-      mensaje: 'Unidad médica CLUES registrada con éxito',
-      data: result.rows[0]
-    });
+    res.json(unidadesMapeadas);
   } catch (error: any) {
-    console.error('Error al registrar CLUES:', error);
+    console.error('Error al obtener CLUES:', error);
     res.status(500).json({ 
       exito: false, 
-      mensaje: 'Error interno al registrar la unidad médica',
+      mensaje: 'Error al obtener el catálogo',
       errorDetalles: error.message 
     });
   }
