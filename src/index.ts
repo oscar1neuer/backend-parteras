@@ -791,23 +791,24 @@ app.post('/api/v1/referencias/:id/contrareferencia', async (req, res) => {
 // Registrar Unidad CLUES desde el formulario del Frontend
 app.post('/api/v1/clues', async (req, res) => {
   try {
-    const { clues, nombre, municipio, localidad, tipo, estatus } = req.body;
+    // Recibimos tanto las variantes nuevas como las viejas por seguridad
+    const { clave_clues, clues, nombre, nombre_unidad, municipio, localidad, tipo, estatus } = req.body;
 
-    // Nota que aquí cambiamos 'clues' por 'clave_clues' para que coincida con tu base de datos
     const query = `
-      INSERT INTO unidades_medicas (clave_clues, nombre, municipio, localidad, tipo, estatus)
+      INSERT INTO unidades_medicas (clave_clues, nombre_unidad, municipio, localidad, tipo, estatus)
       VALUES ($1, $2, $3, $4, $5, $6)
       RETURNING *;
     `;
+    
     const values = [
-      clues, 
-      nombre, 
+      clave_clues || clues, 
+      nombre_unidad || nombre, 
       municipio || null, 
       localidad || null, 
       tipo || null, 
       estatus || 'ACTIVO'
     ];
-    
+
     const result = await pool.query(query, values);
 
     res.status(201).json({
@@ -815,7 +816,6 @@ app.post('/api/v1/clues', async (req, res) => {
       mensaje: 'Unidad médica CLUES registrada con éxito',
       data: result.rows[0]
     });
-
   } catch (error: any) {
     console.error('Error al registrar CLUES:', error);
     res.status(500).json({ 
