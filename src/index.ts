@@ -791,11 +791,21 @@ app.post('/api/v1/referencias/:id/contrareferencia', async (req, res) => {
 // Registrar Unidad CLUES desde el formulario del Frontend
 app.post('/api/v1/clues', async (req, res) => {
   try {
-    // Recibimos tanto las variantes nuevas como las viejas por seguridad
-    const { clave_clues, clues, nombre, nombre_unidad, municipio, localidad, tipo, estatus } = req.body;
+    // Recibimos todas las variantes posibles por seguridad
+    const { 
+      clave_clues, 
+      clues, 
+      nombre, 
+      nombre_unidad, 
+      municipio, 
+      localidad, 
+      tipo_establecimiento, 
+      tipo, 
+      estatus 
+    } = req.body;
 
     const query = `
-      INSERT INTO unidades_medicas (clave_clues, nombre_unidad, municipio, localidad, tipo, estatus)
+      INSERT INTO unidades_medicas (clave_clues, nombre_unidad, municipio, localidad, tipo_establecimiento, estatus)
       VALUES ($1, $2, $3, $4, $5, $6)
       RETURNING *;
     `;
@@ -805,7 +815,7 @@ app.post('/api/v1/clues', async (req, res) => {
       nombre_unidad || nombre, 
       municipio || null, 
       localidad || null, 
-      tipo || null, 
+      tipo_establecimiento || tipo || 'Centro de Salud', 
       estatus || 'ACTIVO'
     ];
 
