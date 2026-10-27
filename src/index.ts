@@ -1,61 +1,94 @@
 import express from 'express';
-import cors from 'cors';
 import { pool } from './db';
+import * as jwt from 'jsonwebtoken';
+
+const cors = require('cors');
 
 const app = express();
 
 app.use(cors());
 app.use(express.json());
 
+const JWT_SECRET = (globalThis as any).process?.env?.JWT_SECRET || 'secreto_jurisdiccion_2';
+
 // 1. Autenticación de Partera por PIN
-app.post('/api/v1/parteras/login-pin', async (req, res) => {
+app.post('/api/v1/parteras/login-pin', async (req: any, res: any) => {
   try {
     const { pin } = req.body;
-    const result = await pool.query('SELECT id, nombre FROM parteras WHERE pin = $1', [pin]);
-    
-    if (result.rows.length > 0) {
-      res.status(200).json({ perfil: result.rows[0], token: 'token-simulado-123' });
-    } else {
-      res.status(401).json({ error: 'PIN incorrecto' });
+
+    if (!pin || pin.length !== 4) {
+      return res.status(400).json({ exito: false, mensaje: 'El PIN debe ser de 4 dígitos' });
     }
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: 'Error en el servidor al autenticar' });
+
+    const result = await pool.query(
+      'SELECT * FROM parteras WHERE pin = $1 AND activo = true',
+      [pin]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(401).json({ exito: false, mensaje: 'PIN inválido o partera inactiva' });
+    }
+
+    const partera = result.rows[0];
+    const token = jwt.sign({ id: partera.id, rol: 'PARTERA_TRADICIONAL' }, JWT_SECRET, { expiresIn: '12h' });
+
+    res.status(200).json({
+      token,
+      user: {
+        id: partera.id,
+        nombre: partera.nombre_completo || partera.nombre,
+        localidad: partera.localidad,
+        municipio: partera.municipio,
+        rol: 'PARTERA_TRADICIONAL',
+        activo: partera.activo
+      },
+      mensaje: `Bienvenida, ${partera.nombre_completo || partera.nombre}`
+    });
+  } catch (error: any) {
+    console.error('Error en login de partera por PIN:', error);
+    res.status(500).json({ exito: false, mensaje: 'Error interno del servidor', detalleTecnico: error.message });
   }
 });
 
 // 2. Registrar Hoja de Referencia (Envío del Formulario)
-app.post('/api/v1/referencias', async (req, res) => {
+app.post('/api/v1/referencias', async (req: any, res: any) => {
   try {
-    const { parteraId, centroSalud, usuaria, motivosReferencia } = req.body;
-    
+    const { parteraId, centroSalud, usuaria, motivosReferencia, fechaRegistro } = req.body;
+
     const query = `
-      INSERT INTO hojas_referencia 
-      (partera_id, centro_salud, nombre_usuaria, edad, sexo, localidad_usuaria, municipio_usuaria, motivos_referencia) 
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *
+      INSERT INTO hojas_referencia (
+        partera_id, centro_salud, nombre_usuaria, edad, sexo, 
+        fecha_referencia, localidad_usuaria, municipio_usuaria, motivos_referencia, estado
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, 'PENDIENTE')
+      RETURNING id, estado, creado_en;
     `;
-    
+
     const values = [
-      parteraId, 
-      centroSalud, 
-      usuaria.nombre, 
-      usuaria.edad, 
-      usuaria.sexo, 
-      usuaria.localidad, 
-      usuaria.municipio, 
+      parteraId,
+      centroSalud,
+      usuaria.nombre,
+      usuaria.edad,
+      usuaria.sexo,
+      fechaRegistro || new Date(),
+      usuaria.localidad,
+      usuaria.municipio,
       JSON.stringify(motivosReferencia)
     ];
-    
+
     const result = await pool.query(query, values);
-    res.status(201).json({ mensaje: 'Hoja de referencia guardada con éxito', referencia: result.rows[0] });
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: 'Error al guardar la hoja de referencia' });
+    res.status(201).json({
+      exito: true,
+      mensaje: 'Hoja de referencia registrada correctamente',
+      data: result.rows[0]
+    });
+  } catch (error: any) {
+    console.error('Error al registrar hoja de referencia:', error);
+    res.status(500).json({ exito: false, mensaje: 'Error al registrar la hoja de referencia', detalleTecnico: error.message });
   }
 });
 
 // 3. Obtener Historial de Referencias (Para desplegar en el Dashboard)
-app.get('/api/v1/referencias', async (_req, res) => {
+app.get('/api/v1/referencias', async (_req: any, res: any) => {
   try {
     const query = `
       SELECT hr.*, c.medico_nombre, c.diagnostico, c.tratamiento, c.observaciones_partera 
@@ -65,39 +98,41 @@ app.get('/api/v1/referencias', async (_req, res) => {
     `;
     const result = await pool.query(query);
     res.status(200).json(result.rows);
-  } catch (error) {
+  } catch (error: any) {
     console.error(error);
-    res.status(500).json({ error: 'Error al consultar las referencias' });
+    res.status(500).json({ error: 'Error al consultar las referencias', detalleTecnico: error.message });
   }
 });
 
 // 4. Responder Contrareferencia Médica
-app.post('/api/v1/referencias/:id/contrareferencia', async (req, res) => {
+app.post('/api/v1/referencias/:id/contrareferencia', async (req: any, res: any) => {
   try {
     const { id } = req.params;
     const { medicoNombre, diagnostico, tratamiento, observacionesPartera } = req.body;
-    
-    await pool.query(
-      'INSERT INTO contrareferencias (hoja_referencia_id, medico_nombre, diagnostico, tratamiento, observaciones_partera) VALUES ($1, $2, $3, $4, $5)',
-      [id, medicoNombre, diagnostico, tratamiento, observacionesPartera]
-    );
+
+    const insertQuery = `
+      INSERT INTO contrareferencias (hoja_referencia_id, medico_nombre, diagnostico, tratamiento, observaciones_partera)
+      VALUES ($1, $2, $3, $4, $5)
+      RETURNING id, fecha_respuesta;
+    `;
+    const insertValues = [id, medicoNombre, diagnostico, tratamiento, observacionesPartera || null];
+    const contraResult = await pool.query(insertQuery, insertValues);
 
     await pool.query("UPDATE hojas_referencia SET estado = 'CONTRAREFERIDO' WHERE id = $1", [id]);
 
-    res.status(201).json({ mensaje: 'Contrareferencia guardada y estado actualizado' });
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: 'Error al procesar la contrareferencia' });
+    res.status(200).json({
+      exito: true,
+      mensaje: 'Contrareferencia médica registrada con éxito',
+      data: contraResult.rows[0]
+    });
+  } catch (error: any) {
+    console.error('Error al registrar contrareferencia:', error);
+    res.status(500).json({ exito: false, mensaje: 'Error al registrar la respuesta médica', detalleTecnico: error.message });
   }
 });
 
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`Servidor Backend de Parteras activo en http://localhost:${PORT}`);
-});
-
 // 5. Registrar Calendario de Atención al Niño(a) (Formato Oficial No. 3 - SSO)
-app.post('/api/v1/calendario-nino', async (req, res) => {
+app.post('/api/v1/calendario-nino', async (req: any, res: any) => {
   try {
     const {
       parteraId,
@@ -117,7 +152,6 @@ app.post('/api/v1/calendario-nino', async (req, res) => {
       RETURNING *;
     `;
 
-    // Maneja id de prueba (1) si el frontend envía un identificador simulado
     const idParteraValido = (typeof parteraId === 'number' || !isNaN(Number(parteraId))) ? Number(parteraId) : 1;
 
     const values = [
@@ -143,14 +177,14 @@ app.post('/api/v1/calendario-nino', async (req, res) => {
       mensaje: 'Registro de calendario del niño guardado con éxito',
       registro: result.rows[0]
     });
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error al insertar el calendario del niño:', error);
-    res.status(500).json({ error: 'Error interno al guardar el registro del niño' });
+    res.status(500).json({ error: 'Error interno al guardar el registro del niño', detalleTecnico: error.message });
   }
 });
 
-// 5. Registrar Calendario de Atención a la Mujer
-app.post('/api/v1/calendario-mujer', async (req, res) => {
+// 6. Registrar Calendario de Atención a la Mujer
+app.post('/api/v1/calendario-mujer', async (req: any, res: any) => {
   try {
     const {
       parteraId,
@@ -227,9 +261,9 @@ app.post('/api/v1/calendario-mujer', async (req, res) => {
         creadoEn: nuevoRegistro.creado_en
       }
     });
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error al registrar calendario:', error);
-    res.status(500).json({ error: 'Error interno al guardar en la base de datos' });
+    res.status(500).json({ error: 'Error interno al guardar en la base de datos', detalleTecnico: error.message });
   }
 });
 
@@ -238,17 +272,17 @@ app.post('/api/v1/calendario-mujer', async (req, res) => {
 // ==========================================
 
 // A. Catálogo de Unidades Médicas CLUES
-app.get('/api/v1/admin/unidades-medicas', async (_req, res) => {
+app.get('/api/v1/admin/unidades-medicas', async (_req: any, res: any) => {
   try {
     const result = await pool.query('SELECT * FROM unidades_medicas ORDER BY nombre_unidad ASC');
     res.status(200).json(result.rows);
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error al obtener unidades médicas:', error);
-    res.status(500).json({ error: 'Error al consultar unidades médicas' });
+    res.status(500).json({ error: 'Error al consultar unidades médicas', detalleTecnico: error.message });
   }
 });
 
-app.post('/api/v1/admin/unidades-medicas', async (req, res) => {
+app.post('/api/v1/admin/unidades-medicas', async (req: any, res: any) => {
   try {
     const { claveClues, nombreUnidad, municipio, localidadAgencia, tipoEstablecimiento } = req.body;
     const query = `
@@ -258,30 +292,30 @@ app.post('/api/v1/admin/unidades-medicas', async (req, res) => {
     `;
     const values = [claveClues, nombreUnidad, municipio, localidadAgencia || null, tipoEstablecimiento];
     const result = await pool.query(query, values);
-    
+
     res.status(201).json({
       success: true,
       message: 'Unidad Médica registrada correctamente en el catálogo CLUES',
       data: result.rows[0]
     });
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error al registrar unidad médica:', error);
-    res.status(500).json({ error: 'Error al registrar la unidad médica' });
+    res.status(500).json({ error: 'Error al registrar la unidad médica', detalleTecnico: error.message });
   }
 });
 
 // B. Gestión de Usuarios Institucionales SSO
-app.get('/api/v1/admin/usuarios-sso', async (_req, res) => {
+app.get('/api/v1/admin/usuarios-sso', async (_req: any, res: any) => {
   try {
     const result = await pool.query('SELECT * FROM usuarios_sso ORDER BY creado_en DESC');
     res.status(200).json(result.rows);
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error al listar usuarios SSO:', error);
-    res.status(500).json({ error: 'Error al consultar usuarios institucionales' });
+    res.status(500).json({ error: 'Error al consultar usuarios institucionales', detalleTecnico: error.message });
   }
 });
 
-app.post('/api/v1/admin/usuarios-sso', async (req, res) => {
+app.post('/api/v1/admin/usuarios-sso', async (req: any, res: any) => {
   try {
     const { nombre, apellidoPaterno, apellidoMaterno, curp, correoInstitucional, telefono, rol, unidadMedicaId, municipio } = req.body;
     const query = `
@@ -297,32 +331,63 @@ app.post('/api/v1/admin/usuarios-sso', async (req, res) => {
       message: 'Cuenta de servidor público creada exitosamente',
       data: result.rows[0]
     });
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error al registrar usuario SSO:', error);
-    res.status(500).json({ error: 'Error al crear la cuenta institucional' });
+    res.status(500).json({ error: 'Error al crear la cuenta institucional', detalleTecnico: error.message });
   }
 });
 
-// C. Acreditación de Parteras Tradicionales
-app.get('/api/v1/admin/parteras', async (_req, res) => {
+// C. Acreditación de Parteras Tradicionales (BLINDADO)
+app.get('/api/v1/admin/parteras', async (_req: any, res: any) => {
   try {
     const result = await pool.query('SELECT * FROM parteras ORDER BY nombre ASC');
     res.status(200).json(result.rows);
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error al listar parteras:', error);
-    res.status(500).json({ error: 'Error al consultar padrón de parteras' });
+    res.status(500).json({ error: 'Error al consultar padrón de parteras', detalleTecnico: error.message });
   }
 });
 
-app.post('/api/v1/admin/parteras', async (req, res) => {
+app.post('/api/v1/admin/parteras', async (req: any, res: any) => {
   try {
-    const { nombre, apellidoPaterno, apellidoMaterno, curp, lenguaMaterna, telefonoRecaudo, municipio, comunidadBarrio, unidadMedicaAdscritaId, pinAcceso } = req.body;
+    const {
+      nombre,
+      apellidoPaterno,
+      apellidoMaterno,
+      curp,
+      lenguaMaterna,
+      telefonoRecaudo,
+      telefono,
+      municipio,
+      comunidadBarrio,
+      comunidad,
+      unidadMedicaAdscritaId,
+      pinAcceso
+    } = req.body;
+
     const query = `
-      INSERT INTO parteras (nombre, apellido_paterno, apellido_materno, curp, lengua_materna, telefono_recaudo, municipio, comunidad_barrio, unidad_medica_adscrita_id, pin_acceso, estado_acreditacion)
+      INSERT INTO parteras (
+        nombre, apellido_paterno, apellido_materno, curp, 
+        lengua_materna, telefono_recaudo, municipio, 
+        comunidad_barrio, unidad_medica_adscrita_id, pin_acceso, estado_acreditacion
+      )
       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'ACREDITADA')
       RETURNING id, nombre, apellido_paterno, estado_acreditacion;
     `;
-    const values = [nombre, apellidoPaterno, apellidoMaterno, curp, lenguaMaterna, telefonoRecaudo, municipio, comunidadBarrio, unidadMedicaAdscritaId || null, pinAcceso || '0000'];
+
+    const values = [
+      nombre || 'Partera',
+      apellidoPaterno || '',
+      apellidoMaterno || '',
+      curp,
+      lenguaMaterna || 'No especificada',
+      telefonoRecaudo || telefono || '',
+      municipio || 'Juchitán de Zaragoza',
+      comunidadBarrio || comunidad || '',
+      unidadMedicaAdscritaId || null,
+      pinAcceso || '0000'
+    ];
+
     const result = await pool.query(query, values);
 
     res.status(201).json({
@@ -330,19 +395,21 @@ app.post('/api/v1/admin/parteras', async (req, res) => {
       message: 'Partera tradicional acreditada exitosamente',
       data: result.rows[0]
     });
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error al registrar partera:', error);
-    res.status(500).json({ error: 'Error al acreditar partera tradicional' });
+    res.status(500).json({
+      error: 'Error al acreditar partera tradicional',
+      detalleTecnico: error.message
+    });
   }
 });
 
 // D. Responder Contrareferencia Médica
-app.put('/api/v1/admin/referencias/:id/contrareferencia', async (req, res) => {
+app.put('/api/v1/admin/referencias/:id/contrareferencia', async (req: any, res: any) => {
   try {
     const { id } = req.params;
     const { medicoAtendio, unidadAtencionId, diagnosticoOficial, conductaMedica, estatus } = req.body;
 
-    // Nota: Asegúrate de tener las columnas correspondientes en la tabla contrareferencias o en hojas_referencia
     const query = `
       INSERT INTO contrareferencias (hoja_referencia_id, medico_atendio, unidad_atencion_id, diagnostico_oficial, conducta_medica, estatus, fecha_respuesta)
       VALUES ($1, $2, $3, $4, $5, $6, NOW())
@@ -356,9 +423,9 @@ app.put('/api/v1/admin/referencias/:id/contrareferencia', async (req, res) => {
       message: 'Contrareferencia médica guardada y enviada correctamente',
       data: result.rows[0]
     });
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error al responder contrareferencia:', error);
-    res.status(500).json({ error: 'Error al procesar la contrareferencia médica' });
+    res.status(500).json({ error: 'Error al procesar la contrareferencia médica', detalleTecnico: error.message });
   }
 });
 
@@ -366,8 +433,7 @@ app.put('/api/v1/admin/referencias/:id/contrareferencia', async (req, res) => {
 // MÓDULO CAPTURISTA DE TAMIZ NEONATAL
 // ==========================================
 
-// 1. Registrar Muestra de Tamiz Neonatal (Tarjeta Guthrie)
-app.post('/api/tamiz/muestras', async (req, res) => {
+app.post('/api/tamiz/muestras', async (req: any, res: any) => {
   try {
     const {
       folio_tarjeta,
@@ -408,7 +474,6 @@ app.post('/api/tamiz/muestras', async (req, res) => {
       observaciones_captura
     } = req.body;
 
-    // Validación de fecha de toma vs fecha de nacimiento
     if (new Date(rn_fecha_toma_muestra) <= new Date(rn_fecha_nacimiento)) {
       return res.status(400).json({ error: 'La fecha de toma de muestra debe ser posterior a la fecha de nacimiento' });
     }
@@ -447,22 +512,21 @@ app.post('/api/tamiz/muestras', async (req, res) => {
       data: result.rows[0]
     });
   } catch (error: any) {
-    if (error.code === '23505') { // Error de unicidad en PostgreSQL
+    if (error.code === '23505') {
       return res.status(409).json({ error: 'El folio de tarjeta especificado ya existe en el sistema' });
     }
     console.error('Error al registrar muestra de tamiz:', error);
-    res.status(500).json({ error: 'Error interno al guardar la muestra en la base de datos' });
+    res.status(500).json({ error: 'Error interno al guardar la muestra en la base de datos', detalleTecnico: error.message });
   }
 });
 
-// 2. Obtener Historial de Muestras Capturadas
-app.get('/api/tamiz/muestras', async (_req, res) => {
+app.get('/api/tamiz/muestras', async (_req: any, res: any) => {
   try {
     const result = await pool.query('SELECT * FROM tamiz_muestras ORDER BY created_at DESC');
     res.status(200).json(result.rows);
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error al obtener muestras de tamiz:', error);
-    res.status(500).json({ error: 'Error al consultar las muestras de tamiz' });
+    res.status(500).json({ error: 'Error al consultar las muestras de tamiz', detalleTecnico: error.message });
   }
 });
 
@@ -470,18 +534,17 @@ app.get('/api/tamiz/muestras', async (_req, res) => {
 // MÓDULO MÉDICO Y CONTRAREFERENCIAS (SSO)
 // ==========================================
 
-// PESTAÑA 1: CASOS PRIORITARIOS Y TAMIZ RECALL
-app.get('/api/medico/tamiz/casos-prioritarios', async (_req, res) => {
+app.get('/api/medico/tamiz/casos-prioritarios', async (_req: any, res: any) => {
   try {
     const result = await pool.query('SELECT * FROM tamiz_casos_prioritarios WHERE estatus_resultado = $1 ORDER BY creado_en DESC', ['RESULTADO_SOSPECHOSO']);
     res.status(200).json(result.rows);
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error al obtener casos prioritarios:', error);
-    res.status(500).json({ error: 'Error al consultar casos prioritarios de tamiz' });
+    res.status(500).json({ error: 'Error al consultar casos prioritarios de tamiz', detalleTecnico: error.message });
   }
 });
 
-app.post('/api/medico/tamiz/solicitar-segunda-muestra', async (req, res) => {
+app.post('/api/medico/tamiz/solicitar-segunda-muestra', async (req: any, res: any) => {
   try {
     const { folioGuthrie, fechaTomaVenosa, tipoMuestra, numeroTuboTarjeta, laboratorioDestino, tecnicoPuncion, observaciones } = req.body;
     const query = `
@@ -492,15 +555,15 @@ app.post('/api/medico/tamiz/solicitar-segunda-muestra', async (req, res) => {
     `;
     const values = [fechaTomaVenosa, tipoMuestra, numeroTuboTarjeta, laboratorioDestino, tecnicoPuncion, observaciones, folioGuthrie];
     const result = await pool.query(query, values);
-    
+
     res.status(200).json({ success: true, message: 'Solicitud de segunda muestra registrada correctamente', data: result.rows[0] });
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error al registrar segunda muestra:', error);
-    res.status(500).json({ error: 'Error al registrar la solicitud de segunda muestra' });
+    res.status(500).json({ error: 'Error al registrar la solicitud de segunda muestra', detalleTecnico: error.message });
   }
 });
 
-app.post('/api/medico/tamiz/confirmar-diagnostico', async (req, res) => {
+app.post('/api/medico/tamiz/confirmar-diagnostico', async (req: any, res: any) => {
   try {
     const { folioGuthrie, diagnosticoCIE10, descripcionDiagnostico, esquemaTerapeutico, fechaInicioTratamiento, medicoTratante, altaTratamiento } = req.body;
     const query = `
@@ -513,24 +576,23 @@ app.post('/api/medico/tamiz/confirmar-diagnostico', async (req, res) => {
     const result = await pool.query(query, values);
 
     res.status(200).json({ success: true, message: 'Diagnóstico confirmado y esquema terapéutico guardado', data: result.rows[0] });
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error al confirmar diagnóstico:', error);
-    res.status(500).json({ error: 'Error al guardar el diagnóstico definitivo' });
+    res.status(500).json({ error: 'Error al guardar el diagnóstico definitivo', detalleTecnico: error.message });
   }
 });
 
-// PESTAÑA 2: EXPEDIENTE DIGITAL CARNÉ PERINATAL (CLAP)
-app.get('/api/medico/perinatales/pacientes-activas', async (_req, res) => {
+app.get('/api/medico/perinatales/pacientes-activas', async (_req: any, res: any) => {
   try {
     const result = await pool.query('SELECT expediente_id AS "expedienteId", nombre, curp, telefono, riesgo_aro AS "riesgoARO" FROM expedientes_perinatales ORDER BY nombre ASC');
     res.status(200).json(result.rows);
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error al listar pacientes activas:', error);
-    res.status(500).json({ error: 'Error al consultar embarazadas activas' });
+    res.status(500).json({ error: 'Error al consultar embarazadas activas', detalleTecnico: error.message });
   }
 });
 
-app.get('/api/medico/perinatales/expediente/:expedienteId', async (req, res) => {
+app.get('/api/medico/perinatales/expediente/:expedienteId', async (req: any, res: any) => {
   try {
     const { expedienteId } = req.params;
     const expResult = await pool.query('SELECT * FROM expedientes_perinatales WHERE expediente_id = $1', [expedienteId]);
@@ -560,13 +622,13 @@ app.get('/api/medico/perinatales/expediente/:expedienteId', async (req, res) => 
       consultasAntenatales: consultasResult.rows,
       partoPuerperio: row.parto_puerperio || { estado: "PENDIENTE" }
     });
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error al obtener expediente perinatal:', error);
-    res.status(500).json({ error: 'Error al consultar el expediente perinatal' });
+    res.status(500).json({ error: 'Error al consultar el expediente perinatal', detalleTecnico: error.message });
   }
 });
 
-app.post('/api/medico/perinatales/expediente/:expedienteId/consultas', async (req, res) => {
+app.post('/api/medico/perinatales/expediente/:expedienteId/consultas', async (req: any, res: any) => {
   try {
     const { expedienteId } = req.params;
     const { fecha, edadGestacional, pesoMadreKg, presionArterial, alturaUterinaFr, fcfLpm, edema, observaciones } = req.body;
@@ -579,24 +641,23 @@ app.post('/api/medico/perinatales/expediente/:expedienteId/consultas', async (re
     const result = await pool.query(query, values);
 
     res.status(201).json({ success: true, message: 'Consulta prenatal agregada correctamente', data: result.rows[0] });
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error al agregar consulta prenatal:', error);
-    res.status(500).json({ error: 'Error al registrar la consulta en el expediente' });
+    res.status(500).json({ error: 'Error al registrar la consulta en el expediente', detalleTecnico: error.message });
   }
 });
 
-// PESTAÑA 3: CONTRAREFERENCIAS Y RED DE ATENCIÓN
-app.get('/api/medico/contrareferencias/referencias-recibidas', async (_req, res) => {
+app.get('/api/medico/contrareferencias/referencias-recibidas', async (_req: any, res: any) => {
   try {
     const result = await pool.query('SELECT * FROM contrareferencias_medicas WHERE estatus = $1 ORDER BY fecha_recepcion DESC', ['PENDIENTE']);
     res.status(200).json(result.rows);
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error al obtener referencias recibidas:', error);
-    res.status(500).json({ error: 'Error al consultar la bandeja de referencias' });
+    res.status(500).json({ error: 'Error al consultar la bandeja de referencias', detalleTecnico: error.message });
   }
 });
 
-app.post('/api/medico/contrareferencias/emitir', async (req, res) => {
+app.post('/api/medico/contrareferencias/emitir', async (req: any, res: any) => {
   try {
     const { referenciaId, diagnosticoCIE10, diagnosticoTexto, resumenManejo, planManejo, unidadDestino, medicoEmisor } = req.body;
     const folioOficial = `CREF-JS2-2026-${Math.floor(1000 + Math.random() * 9000)}`;
@@ -615,21 +676,16 @@ app.post('/api/medico/contrareferencias/emitir', async (req, res) => {
       folioOficial: folioOficial,
       mensaje: 'Contrareferencia registrada e impresa correctamente'
     });
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error al emitir contrareferencia:', error);
-    res.status(500).json({ error: 'Error al emitir el documento de contrareferencia' });
+    res.status(500).json({ error: 'Error al emitir el documento de contrareferencia', detalleTecnico: error.message });
   }
 });
 
 // ==========================================
-// MÓDULO DE AUTENTICACIÓN Y CONTROL DE ACCESO
+// MÓDULO DE AUTENTICACIÓN INSTITUCIONAL
 // ==========================================
-import * as jwt from 'jsonwebtoken';
-
-const JWT_SECRET = process.env.JWT_SECRET || 'secreto_jurisdiccion_2';
-
-// 1. Login Institucional
-app.post('/api/v1/auth/login-institucional', async (req, res) => {
+app.post('/api/v1/auth/login-institucional', async (req: any, res: any) => {
   try {
     const { email, password, rol } = req.body;
 
@@ -670,130 +726,17 @@ app.post('/api/v1/auth/login-institucional', async (req, res) => {
       },
       message: 'Inicio de sesión exitoso'
     });
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error en login institucional:', error);
-    res.status(500).json({ exito: false, message: 'Error interno del servidor' });
-  }
-});
-
-// ==========================================
-// MÓDULO RED DE PARTERAS Y HOJAS DE REFERENCIA
-// ==========================================
-
-// 1. Autenticación de Partera por PIN
-app.post('/api/v1/parteras/login-pin', async (req, res) => {
-  try {
-    const { pin } = req.body;
-
-    if (!pin || pin.length !== 4) {
-      return res.status(400).json({ exito: false, mensaje: 'El PIN debe ser de 4 dígitos' });
-    }
-
-    const result = await pool.query(
-      'SELECT * FROM parteras WHERE pin = $1 AND activo = true',
-      [pin]
-    );
-
-    if (result.rows.length === 0) {
-      return res.status(401).json({ exito: false, mensaje: 'PIN inválido o partera inactiva' });
-    }
-
-    const partera = result.rows[0];
-    const token = jwt.sign({ id: partera.id, rol: 'PARTERA_TRADICIONAL' }, JWT_SECRET, { expiresIn: '12h' });
-
-    res.status(200).json({
-      token,
-      user: {
-        id: partera.id,
-        nombre: partera.nombre_completo,
-        localidad: partera.localidad,
-        municipio: partera.municipio,
-        rol: 'PARTERA_TRADICIONAL',
-        activo: partera.activo
-      },
-      mensaje: `Bienvenida, ${partera.nombre_completo}`
-    });
-  } catch (error) {
-    console.error('Error en login de partera por PIN:', error);
-    res.status(500).json({ exito: false, mensaje: 'Error interno del servidor' });
-  }
-});
-
-// 2. Registrar Hoja de Referencia (Envío del Formulario)
-app.post('/api/v1/referencias', async (req, res) => {
-  try {
-    const { parteraId, centroSalud, usuaria, motivosReferencia, fechaRegistro } = req.body;
-
-    const query = `
-      INSERT INTO hojas_referencia (
-        partera_id, centro_salud, nombre_usuaria, edad, sexo, 
-        fecha_referencia, localidad_usuaria, municipio_usuaria, motivos_referencia, estado
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, 'PENDIENTE')
-      RETURNING id, estado, creado_en;
-    `;
-
-    const values = [
-      parteraId,
-      centroSalud,
-      usuaria.nombre,
-      usuaria.edad,
-      usuaria.sexo,
-      fechaRegistro || new Date(),
-      usuaria.localidad,
-      usuaria.municipio,
-      JSON.stringify(motivosReferencia)
-    ];
-
-    const result = await pool.query(query, values);
-
-    res.status(201).json({
-      exito: true,
-      mensaje: 'Hoja de referencia registrada correctamente',
-      data: result.rows[0]
-    });
-  } catch (error) {
-    console.error('Error al registrar hoja de referencia:', error);
-    res.status(500).json({ exito: false, mensaje: 'Error al registrar la hoja de referencia en la base de datos' });
-  }
-});
-
-// 3. Responder Contrareferencia Médica
-app.post('/api/v1/referencias/:id/contrareferencia', async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { medicoNombre, diagnostico, tratamiento, observacionesPartera } = req.body;
-
-    const insertQuery = `
-      INSERT INTO contrareferencias (hoja_referencia_id, medico_nombre, diagnostico, tratamiento, observaciones_partera)
-      VALUES ($1, $2, $3, $4, $5)
-      RETURNING id, fecha_respuesta;
-    `;
-    const insertValues = [id, medicoNombre, diagnostico, tratamiento, observacionesPartera || null];
-    const contraResult = await pool.query(insertQuery, insertValues);
-
-    // Actualizar el estado de la hoja a CONTRAREFERIDO
-    await pool.query(
-      `UPDATE hojas_referencia SET estado = 'CONTRAREFERIDO' WHERE id = $1`,
-      [id]
-    );
-
-    res.status(200).json({
-      exito: true,
-      mensaje: 'Contrareferencia médica registrada con éxito',
-      data: contraResult.rows[0]
-    });
-  } catch (error) {
-    console.error('Error al registrar contrareferencia:', error);
-    res.status(500).json({ exito: false, mensaje: 'Error al registrar la respuesta médica' });
+    res.status(500).json({ exito: false, message: 'Error interno del servidor', detalleTecnico: error.message });
   }
 });
 
 // Registrar Unidad CLUES desde el formulario del Frontend
-app.get('/api/v1/clues', async (req, res) => {
+app.get('/api/v1/clues', async (_req: any, res: any) => {
   try {
     const result = await pool.query('SELECT * FROM unidades_medicas');
-    
-    // Mapeamos los campos para asegurarnos de que el frontend los reciba con el nombre exacto
+
     const unidadesMapeadas = result.rows.map(row => ({
       id: row.id || row.id_unidad,
       nombre: row.nombre || row.nombre_unidad,
@@ -807,10 +750,15 @@ app.get('/api/v1/clues', async (req, res) => {
     res.json(unidadesMapeadas);
   } catch (error: any) {
     console.error('Error al obtener CLUES:', error);
-    res.status(500).json({ 
-      exito: false, 
+    res.status(500).json({
+      exito: false,
       mensaje: 'Error al obtener el catálogo',
-      errorDetalles: error.message 
+      errorDetalles: error.message
     });
   }
+});
+
+const PORT = (globalThis as any).process?.env?.PORT || 3000;
+app.listen(PORT, () => {
+  console.log(`Servidor Backend de Parteras activo en http://localhost:${PORT}`);
 });
