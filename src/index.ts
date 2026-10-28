@@ -22,7 +22,7 @@ app.post('/api/v1/parteras/login-pin', async (req: any, res: any) => {
     }
 
     const result = await pool.query(
-      'SELECT * FROM parteras WHERE pin = $1 AND (activo = true OR activo IS NULL)',
+      'SELECT * FROM parteras WHERE pin = $1',
       [String(codigoBusqueda).trim()]
     );
 
