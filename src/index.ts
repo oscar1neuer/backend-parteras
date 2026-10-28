@@ -337,7 +337,7 @@ app.post('/api/v1/admin/usuarios-sso', async (req: any, res: any) => {
   }
 });
 
-// C. Acreditación de Parteras Tradicionales (CORREGIDO CON COLUMNA PIN)
+// C. Acreditación de Parteras Tradicionales (BLINDADO CONTRA PIN DUPLICADO)
 app.get('/api/v1/admin/parteras', async (_req: any, res: any) => {
   try {
     const result = await pool.query('SELECT * FROM parteras ORDER BY nombre ASC');
@@ -366,35 +366,56 @@ app.post('/api/v1/admin/parteras', async (req: any, res: any) => {
       pin
     } = req.body;
 
-    const query = `
-      INSERT INTO parteras (
-        nombre, apellido_paterno, apellido_materno, curp, 
-        lengua_materna, telefono_recaudo, municipio, 
-        comunidad_barrio, unidad_medica_adscrita_id, pin, estado_acreditacion
-      )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'ACREDITADA')
-      RETURNING id, nombre, apellido_paterno, estado_acreditacion;
-    `;
+    let pinFinal = pin || pinAcceso;
+    if (!pinFinal || pinFinal.length !== 4) {
+      pinFinal = Math.floor(1000 + Math.random() * 9000).toString();
+    }
 
-    const values = [
-      nombre || 'Partera',
-      apellidoPaterno || '',
-      apellidoMaterno || '',
-      curp,
-      lenguaMaterna || 'No especificada',
-      telefonoRecaudo || telefono || '',
-      municipio || 'Juchitán de Zaragoza',
-      comunidadBarrio || comunidad || '',
-      unidadMedicaAdscritaId || null,
-      pin || pinAcceso || '0000'
-    ];
+    let result: any = null;
+    let intentos = 0;
+    const maxIntentos = 3;
 
-    const result = await pool.query(query, values);
+    while (intentos < maxIntentos) {
+      try {
+        const query = `
+          INSERT INTO parteras (
+            nombre, apellido_paterno, apellido_materno, curp, 
+            lengua_materna, telefono_recaudo, municipio, 
+            comunidad_barrio, unidad_medica_adscrita_id, pin, estado_acreditacion
+          )
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'ACREDITADA')
+          RETURNING id, nombre, apellido_paterno, curp, pin, estado_acreditacion;
+        `;
+
+        const values = [
+          nombre || 'Partera',
+          apellidoPaterno || '',
+          apellidoMaterno || '',
+          curp,
+          lenguaMaterna || 'No especificada',
+          telefonoRecaudo || telefono || '',
+          municipio || 'Juchitán de Zaragoza',
+          comunidadBarrio || comunidad || '',
+          unidadMedicaAdscritaId || null,
+          pinFinal
+        ];
+
+        result = await pool.query(query, values);
+        break;
+      } catch (dbError: any) {
+        if (dbError.code === '23505' && intentos < maxIntentos - 1) {
+          pinFinal = Math.floor(1000 + Math.random() * 9000).toString();
+          intentos++;
+        } else {
+          throw dbError;
+        }
+      }
+    }
 
     res.status(201).json({
       success: true,
       message: 'Partera tradicional acreditada exitosamente',
-      data: result.rows[0]
+      data: result?.rows[0]
     });
   } catch (error: any) {
     console.error('Error al registrar partera:', error);
