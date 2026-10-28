@@ -11,22 +11,23 @@ app.use(express.json());
 
 const JWT_SECRET = (globalThis as any).process?.env?.JWT_SECRET || 'secreto_jurisdiccion_2';
 
-// 1. Autenticación de Partera por PIN
+// 1. Autenticación unificada de Partera por PIN o Código QR
 app.post('/api/v1/parteras/login-pin', async (req: any, res: any) => {
   try {
-    const { pin } = req.body;
+    const { pin, codigo_qr } = req.body;
+    const codigoBusqueda = pin || codigo_qr;
 
-    if (!pin || pin.length !== 4) {
-      return res.status(400).json({ exito: false, mensaje: 'El PIN debe ser de 4 dígitos' });
+    if (!codigoBusqueda || String(codigoBusqueda).trim().length !== 4) {
+      return res.status(400).json({ exito: false, message: 'El PIN o código de acceso debe ser de 4 dígitos' });
     }
 
     const result = await pool.query(
-      'SELECT * FROM parteras WHERE pin = $1 AND activo = true',
-      [pin]
+      'SELECT * FROM parteras WHERE pin = $1 AND (activo = true OR activo IS NULL)',
+      [String(codigoBusqueda).trim()]
     );
 
     if (result.rows.length === 0) {
-      return res.status(401).json({ exito: false, mensaje: 'PIN inválido o partera inactiva' });
+      return res.status(401).json({ exito: false, message: 'PIN inválido o partera no registrada en el sistema' });
     }
 
     const partera = result.rows[0];
@@ -36,17 +37,17 @@ app.post('/api/v1/parteras/login-pin', async (req: any, res: any) => {
       token,
       user: {
         id: partera.id,
-        nombre: partera.nombre_completo || partera.nombre,
-        localidad: partera.localidad,
-        municipio: partera.municipio,
+        nombre: partera.nombre_completo || `${partera.nombre || ''} ${partera.apellido_paterno || ''}`.trim(),
+        localidad: partera.comunidad || partera.comunidad_barrio || partera.localidad || 'Juchitán',
+        municipio: partera.municipio || 'Juchitán de Zaragoza',
         rol: 'PARTERA_TRADICIONAL',
-        activo: partera.activo
+        activo: true
       },
-      mensaje: `Bienvenida, ${partera.nombre_completo || partera.nombre}`
+      message: `Bienvenida, ${partera.nombre_completo || partera.nombre}`
     });
   } catch (error: any) {
-    console.error('Error en login de partera por PIN:', error);
-    res.status(500).json({ exito: false, mensaje: 'Error interno del servidor', detalleTecnico: error.message });
+    console.error('Error en login de partera:', error);
+    res.status(500).json({ exito: false, message: 'Error interno del servidor', detalleTecnico: error.message });
   }
 });
 
