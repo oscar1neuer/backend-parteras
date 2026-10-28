@@ -318,19 +318,54 @@ app.get('/api/v1/admin/usuarios-sso', async (_req: any, res: any) => {
 
 app.post('/api/v1/admin/usuarios-sso', async (req: any, res: any) => {
   try {
-    const { nombre, apellidoPaterno, apellidoMaterno, curp, correoInstitucional, telefono, rol, unidadMedicaId, municipio } = req.body;
+    const {
+      nombre,
+      apellidoPaterno,
+      apellidoMaterno,
+      curp,
+      correoInstitucional,
+      telefono,
+      rol,
+      unidadMedicaId,
+      municipio,
+      unidadAsignada,
+      clues,
+      pinTemporal,
+      estatus
+    } = req.body;
+
     const query = `
-      INSERT INTO usuarios_sso (nombre, apellido_paterno, apellido_materno, curp, correo_institucional, telefono, rol, unidad_medica_id, municipio)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-      RETURNING id, correo_institucional, rol, estado;
+      INSERT INTO usuarios_sso (
+        nombre, apellido_paterno, apellido_materno, curp, 
+        correo_institucional, telefono, rol, unidad_medica_id, 
+        municipio, unidad_asignada, clues, pin_temporal, estado
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+      RETURNING *;
     `;
-    const values = [nombre, apellidoPaterno, apellidoMaterno, curp, correoInstitucional, telefono || null, rol, unidadMedicaId || null, municipio];
+
+    const values = [
+      nombre || '',
+      apellidoPaterno || '',
+      apellidoMaterno || '',
+      curp || '',
+      correoInstitucional || '',
+      telefono || null,
+      rol || 'CAPTURISTA_TAMIZ',
+      unidadMedicaId || null,
+      municipio || 'Juchitán de Zaragoza',
+      unidadAsignada || 'Unidad Médica SSO',
+      clues || 'OASSA000000',
+      pinTemporal || '123456',
+      estatus || 'ACTIVO'
+    ];
+
     const result = await pool.query(query, values);
 
     res.status(201).json({
       success: true,
       message: 'Cuenta de servidor público creada exitosamente',
-      data: result.rows[0]
+      usuario: result.rows[0]
     });
   } catch (error: any) {
     console.error('Error al registrar usuario SSO:', error);
