@@ -305,7 +305,7 @@ app.post('/api/v1/admin/unidades-medicas', async (req: any, res: any) => {
   }
 });
 
-// B. Gestión de Usuarios Institucionales SSO
+// B. Gestión de Usuarios Institucionales SSO (Corregido sin unidad_asignada)
 app.get('/api/v1/admin/usuarios-sso', async (_req: any, res: any) => {
   try {
     const result = await pool.query('SELECT * FROM usuarios_sso ORDER BY creado_en DESC');
@@ -328,19 +328,16 @@ app.post('/api/v1/admin/usuarios-sso', async (req: any, res: any) => {
       rol,
       unidadMedicaId,
       municipio,
-      unidadAsignada,
-      clues,
-      pinTemporal,
-      estatus
+      pinTemporal
     } = req.body;
 
     const query = `
       INSERT INTO usuarios_sso (
         nombre, apellido_paterno, apellido_materno, curp, 
         correo_institucional, telefono, rol, unidad_medica_id, 
-        municipio, unidad_asignada, clues, pin_temporal, estado
+        municipio, pin_temporal, estado
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'ACTIVO')
       RETURNING *;
     `;
 
@@ -354,10 +351,7 @@ app.post('/api/v1/admin/usuarios-sso', async (req: any, res: any) => {
       rol || 'CAPTURISTA_TAMIZ',
       unidadMedicaId || null,
       municipio || 'Juchitán de Zaragoza',
-      unidadAsignada || 'Unidad Médica SSO',
-      clues || 'OASSA000000',
-      pinTemporal || '123456',
-      estatus || 'ACTIVO'
+      pinTemporal || '123456'
     ];
 
     const result = await pool.query(query, values);
@@ -373,7 +367,7 @@ app.post('/api/v1/admin/usuarios-sso', async (req: any, res: any) => {
   }
 });
 
-// C. Acreditación de Parteras Tradicionales (COMPATIBLE CON LA DB ACTUAL)
+// C. Acreditación de Parteras Tradicionales
 app.get('/api/v1/admin/parteras', async (_req: any, res: any) => {
   try {
     const result = await pool.query('SELECT * FROM parteras ORDER BY nombre ASC');
