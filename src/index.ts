@@ -305,7 +305,7 @@ app.post('/api/v1/admin/unidades-medicas', async (req: any, res: any) => {
   }
 });
 
-// B. Gestión de Usuarios Institucionales SSO (Corregido sin unidad_asignada)
+// B. Gestión de Usuarios Institucionales SSO (Con pin_temporal activo)
 app.get('/api/v1/admin/usuarios-sso', async (_req: any, res: any) => {
   try {
     const result = await pool.query('SELECT * FROM usuarios_sso ORDER BY creado_en DESC');
@@ -754,7 +754,7 @@ app.post('/api/v1/auth/login-institucional', async (req: any, res: any) => {
 
     const user = result.rows[0];
 
-    if (password !== 'PasswordSeguro123!' && password !== user.password) {
+    if (password !== 'PasswordSeguro123!' && password !== user.password && password !== user.pin_temporal) {
       return res.status(401).json({
         exito: false,
         codigoError: 'UNAUTHORIZED_CREDENTIALS',
