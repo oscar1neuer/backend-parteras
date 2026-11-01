@@ -305,7 +305,7 @@ app.post('/api/v1/admin/unidades-medicas', async (req: any, res: any) => {
   }
 });
 
-// B. Gestión de Usuarios Institucionales SSO (Con pin_temporal activo)
+// B. Gestión de Usuarios Institucionales SSO (Mapeado a la columna password de Neon)
 app.get('/api/v1/admin/usuarios-sso', async (_req: any, res: any) => {
   try {
     const result = await pool.query('SELECT * FROM usuarios_sso ORDER BY creado_en DESC');
@@ -335,7 +335,7 @@ app.post('/api/v1/admin/usuarios-sso', async (req: any, res: any) => {
       INSERT INTO usuarios_sso (
         nombre, apellido_paterno, apellido_materno, curp, 
         correo_institucional, telefono, rol, unidad_medica_id, 
-        municipio, pin_temporal, estado
+        municipio, password, estado
       )
       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'ACTIVO')
       RETURNING *;
@@ -754,7 +754,7 @@ app.post('/api/v1/auth/login-institucional', async (req: any, res: any) => {
 
     const user = result.rows[0];
 
-    if (password !== 'PasswordSeguro123!' && password !== user.password && password !== user.pin_temporal) {
+    if (password !== 'PasswordSeguro123!' && password !== user.password) {
       return res.status(401).json({
         exito: false,
         codigoError: 'UNAUTHORIZED_CREDENTIALS',
