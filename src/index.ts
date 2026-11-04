@@ -16,6 +16,19 @@ const JWT_SECRET = (globalThis as any).process?.env?.JWT_SECRET || 'secreto_juri
 // Configuración de multer para recibir fotos en memoria temporalmente para el OCR
 const upload = multer({ storage: multer.memoryStorage() });
 
+// ==========================================
+// OPTIMIZACIÓN OCR: PATRÓN SINGLETON PARA VERCEL
+// ==========================================
+let workerInstance: any = null;
+
+const getTesseractWorker = async () => {
+  if (!workerInstance) {
+    console.log('Inicializando worker global de Tesseract (Carga única)...');
+    workerInstance = await createWorker('spa');
+  }
+  return workerInstance;
+};
+
 // 1. Autenticación unificada de Partera por PIN o Código QR
 app.post('/api/v1/parteras/login-pin', async (req: any, res: any) => {
   try {
@@ -93,7 +106,7 @@ app.post('/api/v1/referencias', async (req: any, res: any) => {
   }
 });
 
-// 3. Obtener Historial de Referencias (Para desplegar en el Dashboard)
+// 3. Obtener Historial de Referencias
 app.get('/api/v1/referencias', async (_req: any, res: any) => {
   try {
     const query = `
@@ -137,17 +150,10 @@ app.post('/api/v1/referencias/:id/contrareferencia', async (req: any, res: any) 
   }
 });
 
-// 5. Registrar Calendario de Atención al Niño(a) (Formato Oficial No. 3 - SSO)
+// 5. Registrar Calendario de Atención al Niño(a)
 app.post('/api/v1/calendario-nino', async (req: any, res: any) => {
   try {
-    const {
-      parteraId,
-      datosNino,
-      estadoNutricional,
-      tipoLactancia,
-      canalizaciones,
-      cierreAdministrativo
-    } = req.body;
+    const { parteraId, datosNino, estadoNutricional, tipoLactancia, canalizaciones, cierreAdministrativo } = req.body;
 
     const query = `
       INSERT INTO calendario_nino (
@@ -192,34 +198,17 @@ app.post('/api/v1/calendario-nino', async (req: any, res: any) => {
 // 6. Registrar Calendario de Atención a la Mujer
 app.post('/api/v1/calendario-mujer', async (req: any, res: any) => {
   try {
-    const {
-      parteraId,
-      datosUsuaria,
-      controlPrenatal,
-      embarazoComplicaciones,
-      complicacionesHemorragicas,
-      partoNormal,
-      partoComplicado,
-      puerperio,
-      alertaMuerteMaterna,
-      cierreAdministrativo
-    } = req.body;
+    const { parteraId, datosUsuaria, controlPrenatal, embarazoComplicaciones, complicacionesHemorragicas, partoNormal, partoComplicado, puerperio, alertaMuerteMaterna, cierreAdministrativo } = req.body;
 
     const query = `
       INSERT INTO calendario_mujer (
-        partera_id,
-        nombre_mujer, edad, fecha_consulta, localidad, municipio,
+        partera_id, nombre_mujer, edad, fecha_consulta, localidad, municipio,
         mes_embarazo_activo, acido_folico_entregado, sulfato_ferroso_entregado, vacuna_tetanos, muac_embarazo,
-        embarazo_referido, sintomas_embarazo,
-        aborto_dolor_hemorragia_referido, complicaciones_hemorragicas,
-        tipo_parto_normal, resultado_parto_normal,
-        parto_complicado_referido, resultado_parto_complicado,
-        muac_puerperio, puerperio_complicado_referido, sintomas_puerperio,
-        muerte_materna_registrada, etapa_muerte_materna,
+        embarazo_referido, sintomas_embarazo, aborto_dolor_hemorragia_referido, complicaciones_hemorragicas,
+        tipo_parto_normal, resultado_parto_normal, parto_complicado_referido, resultado_parto_complicado,
+        muac_puerperio, puerperio_complicado_referido, sintomas_puerperio, muerte_materna_registrada, etapa_muerte_materna,
         mes_informado, nombre_supervisor, centro_salud_adscripcion, huella_firmada
-      ) VALUES (
-        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28
-      )
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28)
       RETURNING id, partera_id, creado_en;
     `;
 
@@ -274,7 +263,7 @@ app.post('/api/v1/calendario-mujer', async (req: any, res: any) => {
 });
 
 // ==========================================
-// MÓDULO ADMINISTRATIVO (Jurisdicción Sanitaria No. 2)
+// MÓDULO ADMINISTRATIVO Y CLUES
 // ==========================================
 app.get('/api/v1/admin/unidades-medicas', async (_req: any, res: any) => {
   try {
@@ -498,11 +487,7 @@ app.post('/api/v1/tamiz/muestras', async (req: any, res: any) => {
     ];
 
     const result = await pool.query(query, values);
-    res.status(201).json({
-      success: true,
-      message: 'Muestra de Tamiz Neonatal registrada correctamente',
-      data: result.rows[0]
-    });
+    res.status(201).json({ success: true, message: 'Muestra de Tamiz Neonatal registrada correctamente', data: result.rows[0] });
   } catch (error: any) {
     if (error.code === '23505') {
       return res.status(409).json({ error: 'El folio de tarjeta especificado ya existe en el sistema' });
@@ -523,7 +508,7 @@ app.get('/api/v1/tamiz/muestras', async (_req: any, res: any) => {
 });
 
 // ==========================================
-// ENDPOINT DE ESCANEO OCR CON IA (Soporta doble prefijo para evitar duplicaciones)
+// ENDPOINT DE ESCANEO OCR OPTIMIZADO (Con Singleto Worker)
 // ==========================================
 const procesarEscaneoOCR = async (req: any, res: any) => {
   try {
@@ -531,17 +516,16 @@ const procesarEscaneoOCR = async (req: any, res: any) => {
       return res.status(400).json({ success: false, error: 'No se adjuntó ninguna imagen de la tarjeta Guthrie' });
     }
 
-    console.log('Iniciando procesamiento OCR en servidor...');
-    const worker = await createWorker('spa');
+    console.log('Procesando imagen con worker optimizado de Tesseract...');
+    const worker = await getTesseractWorker();
     const ret = await worker.recognize(req.file.buffer);
     const textoDetectado = ret.data.text || '';
-    await worker.terminate();
 
     const matchFolio = textoDetectado.match(/(?:FOLIO|TARJETA|GT)[\s:-]*([A-Z0-9-]{4,15})/i);
     const matchCurp = textoDetectado.match(/[A-Z]{4}[0-9]{6}[HM][A-Z]{5}[0-9]{2}/);
     const matchClues = textoDetectado.match(/[A-Z]{5}[0-9]{5}/);
 
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
       message: 'Tarjeta escaneada y procesada con éxito por OCR',
       data_extracted: {
@@ -553,7 +537,7 @@ const procesarEscaneoOCR = async (req: any, res: any) => {
     });
   } catch (error: any) {
     console.error('Error al procesar OCR:', error);
-    res.status(500).json({ success: false, error: 'Error al procesar la imagen con inteligencia artificial', detalleTecnico: error.message });
+    return res.status(500).json({ success: false, error: 'Error al procesar la imagen con inteligencia artificial', detalleTecnico: error.message });
   }
 };
 
