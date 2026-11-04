@@ -451,7 +451,7 @@ app.put('/api/v1/admin/referencias/:id/contrareferencia', async (req: any, res: 
 });
 
 // ==========================================
-// MÓDULO CAPTURISTA DE TAMIZ NEONATAL (Ruta corregida)
+// MÓDULO CAPTURISTA DE TAMIZ NEONATAL
 // ==========================================
 app.post('/api/v1/tamiz/muestras', async (req: any, res: any) => {
   try {
@@ -523,9 +523,9 @@ app.get('/api/v1/tamiz/muestras', async (_req: any, res: any) => {
 });
 
 // ==========================================
-// ENDPOINT DE ESCANEO OCR CON IA (Tesseract.js)
+// ENDPOINT DE ESCANEO OCR CON IA (Soporta doble prefijo para evitar duplicaciones)
 // ==========================================
-app.post('/api/v1/captura/escanear-tarjeta-ia', upload.single('tarjetaImage'), async (req: any, res: any) => {
+const procesarEscaneoOCR = async (req: any, res: any) => {
   try {
     if (!req.file || !req.file.buffer) {
       return res.status(400).json({ success: false, error: 'No se adjuntó ninguna imagen de la tarjeta Guthrie' });
@@ -555,7 +555,10 @@ app.post('/api/v1/captura/escanear-tarjeta-ia', upload.single('tarjetaImage'), a
     console.error('Error al procesar OCR:', error);
     res.status(500).json({ success: false, error: 'Error al procesar la imagen con inteligencia artificial', detalleTecnico: error.message });
   }
-});
+};
+
+app.post('/api/v1/captura/escanear-tarjeta-ia', upload.single('tarjetaImage'), procesarEscaneoOCR);
+app.post('/captura/escanear-tarjeta-ia', upload.single('tarjetaImage'), procesarEscaneoOCR);
 
 // ==========================================
 // MÓDULO MÉDICO Y CONTRAREFERENCIAS (SSO)
