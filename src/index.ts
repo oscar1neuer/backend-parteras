@@ -1,8 +1,6 @@
 import express from 'express';
 import { pool } from './db';
 import * as jwt from 'jsonwebtoken';
-import multer from 'multer';
-import { createWorker } from 'tesseract.js';
 
 const cors = require('cors');
 
@@ -12,22 +10,6 @@ app.use(cors());
 app.use(express.json());
 
 const JWT_SECRET = (globalThis as any).process?.env?.JWT_SECRET || 'secreto_jurisdiccion_2';
-
-// Configuración de multer para recibir fotos en memoria temporalmente para el OCR
-const upload = multer({ storage: multer.memoryStorage() });
-
-// ==========================================
-// OPTIMIZACIÓN OCR: PATRÓN SINGLETON PARA VERCEL
-// ==========================================
-let workerInstance: any = null;
-
-const getTesseractWorker = async () => {
-  if (!workerInstance) {
-    console.log('Inicializando worker global de Tesseract (Carga única)...');
-    workerInstance = await createWorker('spa');
-  }
-  return workerInstance;
-};
 
 // 1. Autenticación unificada de Partera por PIN o Código QR
 app.post('/api/v1/parteras/login-pin', async (req: any, res: any) => {
@@ -146,7 +128,7 @@ app.post('/api/v1/referencias/:id/contrareferencia', async (req: any, res: any) 
     });
   } catch (error: any) {
     console.error('Error al registrar contrareferencia:', error);
-    res.status(500).json({ exito: false, mensaje: 'Error al registrar la respuesta médica', detalleTecnico: error.message });
+    res.status(500).json({ exito: false, message: 'Error al registrar la respuesta médica', detalleTecnico: error.message });
   }
 });
 
@@ -506,43 +488,6 @@ app.get('/api/v1/tamiz/muestras', async (_req: any, res: any) => {
     res.status(500).json({ error: 'Error al consultar las muestras de tamiz', detalleTecnico: error.message });
   }
 });
-
-// ==========================================
-// ENDPOINT DE ESCANEO OCR OPTIMIZADO (Con Singleto Worker)
-// ==========================================
-const procesarEscaneoOCR = async (req: any, res: any) => {
-  try {
-    if (!req.file || !req.file.buffer) {
-      return res.status(400).json({ success: false, error: 'No se adjuntó ninguna imagen de la tarjeta Guthrie' });
-    }
-
-    console.log('Procesando imagen con worker optimizado de Tesseract...');
-    const worker = await getTesseractWorker();
-    const ret = await worker.recognize(req.file.buffer);
-    const textoDetectado = ret.data.text || '';
-
-    const matchFolio = textoDetectado.match(/(?:FOLIO|TARJETA|GT)[\s:-]*([A-Z0-9-]{4,15})/i);
-    const matchCurp = textoDetectado.match(/[A-Z]{4}[0-9]{6}[HM][A-Z]{5}[0-9]{2}/);
-    const matchClues = textoDetectado.match(/[A-Z]{5}[0-9]{5}/);
-
-    return res.status(200).json({
-      success: true,
-      message: 'Tarjeta escaneada y procesada con éxito por OCR',
-      data_extracted: {
-        folio_tarjeta: matchFolio ? matchFolio[1] : '',
-        madre_curp: matchCurp ? matchCurp[0] : '',
-        clues_unidad: matchClues ? matchClues[0] : '',
-        texto_crudo: textoDetectado
-      }
-    });
-  } catch (error: any) {
-    console.error('Error al procesar OCR:', error);
-    return res.status(500).json({ success: false, error: 'Error al procesar la imagen con inteligencia artificial', detalleTecnico: error.message });
-  }
-};
-
-app.post('/api/v1/captura/escanear-tarjeta-ia', upload.single('tarjetaImage'), procesarEscaneoOCR);
-app.post('/captura/escanear-tarjeta-ia', upload.single('tarjetaImage'), procesarEscaneoOCR);
 
 // ==========================================
 // MÓDULO MÉDICO Y CONTRAREFERENCIAS (SSO)
