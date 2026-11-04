@@ -480,10 +480,10 @@ app.put('/api/v1/admin/referencias/:id/contrareferencia', async (req: any, res: 
 });
 
 // ==========================================
-// MÓDULO CAPTURISTA DE TAMIZ NEONATAL
+// MÓDULO CAPTURISTA DE TAMIZ NEONATAL (CORREGIDO A /api/v1/...)
 // ==========================================
 
-app.post('/api/tamiz/muestras', async (req: any, res: any) => {
+app.post('/api/v1/tamiz/muestras', async (req: any, res: any) => {
   try {
     const {
       folio_tarjeta,
@@ -570,7 +570,7 @@ app.post('/api/tamiz/muestras', async (req: any, res: any) => {
   }
 });
 
-app.get('/api/tamiz/muestras', async (_req: any, res: any) => {
+app.get('/api/v1/tamiz/muestras', async (_req: any, res: any) => {
   try {
     const result = await pool.query('SELECT * FROM tamiz_muestras ORDER BY created_at DESC');
     res.status(200).json(result.rows);
