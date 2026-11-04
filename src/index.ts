@@ -1,6 +1,8 @@
 import express from 'express';
 import { pool } from './db';
 import * as jwt from 'jsonwebtoken';
+import multer from 'multer';
+import { createWorker } from 'tesseract.js';
 
 const cors = require('cors');
 
@@ -10,6 +12,9 @@ app.use(cors());
 app.use(express.json());
 
 const JWT_SECRET = (globalThis as any).process?.env?.JWT_SECRET || 'secreto_jurisdiccion_2';
+
+// Configuración de multer para recibir fotos en memoria temporalmente para el OCR
+const upload = multer({ storage: multer.memoryStorage() });
 
 // 1. Autenticación unificada de Partera por PIN o Código QR
 app.post('/api/v1/parteras/login-pin', async (req: any, res: any) => {
@@ -271,8 +276,6 @@ app.post('/api/v1/calendario-mujer', async (req: any, res: any) => {
 // ==========================================
 // MÓDULO ADMINISTRATIVO (Jurisdicción Sanitaria No. 2)
 // ==========================================
-
-// A. Catálogo de Unidades Médicas CLUES
 app.get('/api/v1/admin/unidades-medicas', async (_req: any, res: any) => {
   try {
     const result = await pool.query('SELECT * FROM unidades_medicas ORDER BY nombre_unidad ASC');
@@ -305,7 +308,6 @@ app.post('/api/v1/admin/unidades-medicas', async (req: any, res: any) => {
   }
 });
 
-// B. Gestión de Usuarios Institucionales SSO
 app.get('/api/v1/admin/usuarios-sso', async (_req: any, res: any) => {
   try {
     const result = await pool.query('SELECT * FROM usuarios_sso ORDER BY creado_en DESC');
@@ -353,7 +355,6 @@ app.post('/api/v1/admin/usuarios-sso', async (req: any, res: any) => {
   }
 });
 
-// C. Acreditación de Parteras Tradicionales
 app.get('/api/v1/admin/parteras', async (_req: any, res: any) => {
   try {
     const result = await pool.query('SELECT * FROM parteras ORDER BY nombre ASC');
@@ -425,7 +426,6 @@ app.post('/api/v1/admin/parteras', async (req: any, res: any) => {
   }
 });
 
-// D. Responder Contrareferencia Médica Administrativa
 app.put('/api/v1/admin/referencias/:id/contrareferencia', async (req: any, res: any) => {
   try {
     const { id } = req.params;
@@ -451,7 +451,7 @@ app.put('/api/v1/admin/referencias/:id/contrareferencia', async (req: any, res: 
 });
 
 // ==========================================
-// MÓDULO CAPTURISTA DE TAMIZ NEONATAL (Corregido a /api/v1/)
+// MÓDULO CAPTURISTA DE TAMIZ NEONATAL (Ruta corregida)
 // ==========================================
 app.post('/api/v1/tamiz/muestras', async (req: any, res: any) => {
   try {
@@ -519,6 +519,41 @@ app.get('/api/v1/tamiz/muestras', async (_req: any, res: any) => {
   } catch (error: any) {
     console.error('Error al obtener muestras de tamiz:', error);
     res.status(500).json({ error: 'Error al consultar las muestras de tamiz', detalleTecnico: error.message });
+  }
+});
+
+// ==========================================
+// ENDPOINT DE ESCANEO OCR CON IA (Tesseract.js)
+// ==========================================
+app.post('/api/v1/captura/escanear-tarjeta-ia', upload.single('tarjetaImage'), async (req: any, res: any) => {
+  try {
+    if (!req.file || !req.file.buffer) {
+      return res.status(400).json({ success: false, error: 'No se adjuntó ninguna imagen de la tarjeta Guthrie' });
+    }
+
+    console.log('Iniciando procesamiento OCR en servidor...');
+    const worker = await createWorker('spa');
+    const ret = await worker.recognize(req.file.buffer);
+    const textoDetectado = ret.data.text || '';
+    await worker.terminate();
+
+    const matchFolio = textoDetectado.match(/(?:FOLIO|TARJETA|GT)[\s:-]*([A-Z0-9-]{4,15})/i);
+    const matchCurp = textoDetectado.match(/[A-Z]{4}[0-9]{6}[HM][A-Z]{5}[0-9]{2}/);
+    const matchClues = textoDetectado.match(/[A-Z]{5}[0-9]{5}/);
+
+    res.status(200).json({
+      success: true,
+      message: 'Tarjeta escaneada y procesada con éxito por OCR',
+      data_extracted: {
+        folio_tarjeta: matchFolio ? matchFolio[1] : '',
+        madre_curp: matchCurp ? matchCurp[0] : '',
+        clues_unidad: matchClues ? matchClues[0] : '',
+        texto_crudo: textoDetectado
+      }
+    });
+  } catch (error: any) {
+    console.error('Error al procesar OCR:', error);
+    res.status(500).json({ success: false, error: 'Error al procesar la imagen con inteligencia artificial', detalleTecnico: error.message });
   }
 });
 
