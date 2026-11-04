@@ -1,6 +1,8 @@
 import express from 'express';
 import { pool } from './db';
 import * as jwt from 'jsonwebtoken';
+import multer from 'multer';
+import { createWorker } from 'tesseract.js';
 
 const cors = require('cors');
 
@@ -10,6 +12,9 @@ app.use(cors());
 app.use(express.json());
 
 const JWT_SECRET = (globalThis as any).process?.env?.JWT_SECRET || 'secreto_jurisdiccion_2';
+
+// Configuración de multer para recibir fotos en memoria temporalmente
+const upload = multer({ storage: multer.memoryStorage() });
 
 // 1. Autenticación unificada de Partera por PIN o Código QR
 app.post('/api/v1/parteras/login-pin', async (req: any, res: any) => {
@@ -88,7 +93,7 @@ app.post('/api/v1/referencias', async (req: any, res: any) => {
   }
 });
 
-// 3. Obtener Historial de Referencias (Para desplegar en el Dashboard)
+// 3. Obtener Historial de Referencias
 app.get('/api/v1/referencias', async (_req: any, res: any) => {
   try {
     const query = `
@@ -132,7 +137,7 @@ app.post('/api/v1/referencias/:id/contrareferencia', async (req: any, res: any) 
   }
 });
 
-// 5. Registrar Calendario de Atención al Niño(a) (Formato Oficial No. 3 - SSO)
+// 5. Registrar Calendario de Atención al Niño(a)
 app.post('/api/v1/calendario-nino', async (req: any, res: any) => {
   try {
     const {
@@ -269,10 +274,8 @@ app.post('/api/v1/calendario-mujer', async (req: any, res: any) => {
 });
 
 // ==========================================
-// MÓDULO ADMINISTRATIVO (Jurisdicción Sanitaria No. 2)
+// MÓDULO ADMINISTRATIVO
 // ==========================================
-
-// A. Catálogo de Unidades Médicas CLUES
 app.get('/api/v1/admin/unidades-medicas', async (_req: any, res: any) => {
   try {
     const result = await pool.query('SELECT * FROM unidades_medicas ORDER BY nombre_unidad ASC');
@@ -305,7 +308,6 @@ app.post('/api/v1/admin/unidades-medicas', async (req: any, res: any) => {
   }
 });
 
-// B. Gestión de Usuarios Institucionales SSO (Mapeado a la columna password de Neon)
 app.get('/api/v1/admin/usuarios-sso', async (_req: any, res: any) => {
   try {
     const result = await pool.query('SELECT * FROM usuarios_sso ORDER BY creado_en DESC');
@@ -318,19 +320,7 @@ app.get('/api/v1/admin/usuarios-sso', async (_req: any, res: any) => {
 
 app.post('/api/v1/admin/usuarios-sso', async (req: any, res: any) => {
   try {
-    const {
-      nombre,
-      apellidoPaterno,
-      apellidoMaterno,
-      curp,
-      correoInstitucional,
-      telefono,
-      rol,
-      unidadMedicaId,
-      municipio,
-      pinTemporal
-    } = req.body;
-
+    const { nombre, apellidoPaterno, apellidoMaterno, curp, correoInstitucional, telefono, rol, unidadMedicaId, municipio, pinTemporal } = req.body;
     const query = `
       INSERT INTO usuarios_sso (
         nombre, apellido_paterno, apellido_materno, curp, 
@@ -340,34 +330,16 @@ app.post('/api/v1/admin/usuarios-sso', async (req: any, res: any) => {
       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'ACTIVO')
       RETURNING *;
     `;
-
-    const values = [
-      nombre || '',
-      apellidoPaterno || '',
-      apellidoMaterno || '',
-      curp || '',
-      correoInstitucional || '',
-      telefono || null,
-      rol || 'CAPTURISTA_TAMIZ',
-      unidadMedicaId || null,
-      municipio || 'Juchitán de Zaragoza',
-      pinTemporal || '123456'
-    ];
-
+    const values = [nombre || '', apellidoPaterno || '', apellidoMaterno || '', curp || '', correoInstitucional || '', telefono || null, rol || 'CAPTURISTA_TAMIZ', unidadMedicaId || null, municipio || 'Juchitán de Zaragoza', pinTemporal || '123456'];
     const result = await pool.query(query, values);
 
-    res.status(201).json({
-      success: true,
-      message: 'Cuenta de servidor público creada exitosamente',
-      usuario: result.rows[0]
-    });
+    res.status(201).json({ success: true, message: 'Cuenta de servidor público creada exitosamente', usuario: result.rows[0] });
   } catch (error: any) {
     console.error('Error al registrar usuario SSO:', error);
     res.status(500).json({ error: 'Error al crear la cuenta institucional', detalleTecnico: error.message });
   }
 });
 
-// C. Acreditación de Parteras Tradicionales
 app.get('/api/v1/admin/parteras', async (_req: any, res: any) => {
   try {
     const result = await pool.query('SELECT * FROM parteras ORDER BY nombre ASC');
@@ -380,21 +352,7 @@ app.get('/api/v1/admin/parteras', async (_req: any, res: any) => {
 
 app.post('/api/v1/admin/parteras', async (req: any, res: any) => {
   try {
-    const {
-      nombre,
-      apellidoPaterno,
-      apellidoMaterno,
-      curp,
-      lenguaMaterna,
-      telefonoRecaudo,
-      telefono,
-      municipio,
-      comunidadBarrio,
-      comunidad,
-      pinAcceso,
-      pin
-    } = req.body;
-
+    const { nombre, apellidoPaterno, apellidoMaterno, curp, lenguaMaterna, telefonoRecaudo, telefono, municipio, comunidadBarrio, comunidad, pinAcceso, pin } = req.body;
     let pinFinal = pin || pinAcceso;
     if (!pinFinal || pinFinal.length !== 4) {
       pinFinal = Math.floor(1000 + Math.random() * 9000).toString();
@@ -402,9 +360,7 @@ app.post('/api/v1/admin/parteras', async (req: any, res: any) => {
 
     let result: any = null;
     let intentos = 0;
-    const maxIntentos = 3;
-
-    while (intentos < maxIntentos) {
+    while (intentos < 3) {
       try {
         const query = `
           INSERT INTO parteras (
@@ -415,23 +371,11 @@ app.post('/api/v1/admin/parteras', async (req: any, res: any) => {
           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'ACREDITADA')
           RETURNING id, nombre, apellido_paterno, curp, pin, estado_acreditacion;
         `;
-
-        const values = [
-          nombre || 'Partera',
-          apellidoPaterno || '',
-          apellidoMaterno || '',
-          curp,
-          lenguaMaterna || 'No especificada',
-          telefonoRecaudo || telefono || '',
-          municipio || 'Juchitán de Zaragoza',
-          comunidadBarrio || comunidad || '',
-          pinFinal
-        ];
-
+        const values = [nombre || 'Partera', apellidoPaterno || '', apellidoMaterno || '', curp, lenguaMaterna || 'No especificada', telefonoRecaudo || telefono || '', municipio || 'Juchitán de Zaragoza', comunidadBarrio || comunidad || '', pinFinal];
         result = await pool.query(query, values);
         break;
       } catch (dbError: any) {
-        if (dbError.code === '23505' && intentos < maxIntentos - 1) {
+        if (dbError.code === '23505' && intentos < 2) {
           pinFinal = Math.floor(1000 + Math.random() * 9000).toString();
           intentos++;
         } else {
@@ -440,88 +384,28 @@ app.post('/api/v1/admin/parteras', async (req: any, res: any) => {
       }
     }
 
-    res.status(201).json({
-      success: true,
-      message: 'Partera tradicional acreditada exitosamente',
-      data: result?.rows[0]
-    });
+    res.status(201).json({ success: true, message: 'Partera tradicional acreditada exitosamente', data: result?.rows[0] });
   } catch (error: any) {
     console.error('Error al registrar partera:', error);
-    res.status(500).json({
-      error: 'Error al acreditar partera tradicional',
-      detalleTecnico: error.message
-    });
-  }
-});
-
-// D. Responder Contrareferencia Médica
-app.put('/api/v1/admin/referencias/:id/contrareferencia', async (req: any, res: any) => {
-  try {
-    const { id } = req.params;
-    const { medicoAtendio, unidadAtencionId, diagnosticoOficial, conductaMedica, estatus } = req.body;
-
-    const query = `
-      INSERT INTO contrareferencias (hoja_referencia_id, medico_atendio, unidad_atencion_id, diagnostico_oficial, conducta_medica, estatus, fecha_respuesta)
-      VALUES ($1, $2, $3, $4, $5, $6, NOW())
-      RETURNING id, estatus;
-    `;
-    const values = [id, medicoAtendio, unidadAtencionId || null, diagnosticoOficial, conductaMedica, estatus || 'CONTRAREFERIDO'];
-    const result = await pool.query(query, values);
-
-    res.status(200).json({
-      success: true,
-      message: 'Contrareferencia médica guardada y enviada correctamente',
-      data: result.rows[0]
-    });
-  } catch (error: any) {
-    console.error('Error al responder contrareferencia:', error);
-    res.status(500).json({ error: 'Error al procesar la contrareferencia médica', detalleTecnico: error.message });
+    res.status(500).json({ error: 'Error al acreditar partera tradicional', detalleTecnico: error.message });
   }
 });
 
 // ==========================================
-// MÓDULO CAPTURISTA DE TAMIZ NEONATAL (CORREGIDO A /api/v1/...)
+// MÓDULO CAPTURISTA DE TAMIZ NEONATAL (Corregido a /api/v1/)
 // ==========================================
 
 app.post('/api/v1/tamiz/muestras', async (req: any, res: any) => {
   try {
     const {
-      folio_tarjeta,
-      clues_unidad,
-      unidad_medica_nombre,
-      responsable_toma_nombre,
-      tecnica_toma,
-      tecnica_toma_especificar,
-      rn_nombres,
-      rn_apellido_paterno,
-      rn_apellido_materno,
-      rn_fecha_nacimiento,
-      rn_fecha_toma_muestra,
-      rn_sexo,
-      rn_edad_gestacional,
-      rn_producto,
-      rn_peso_gramos,
-      rn_talla_cm,
-      rn_malformaciones_congenitas,
-      rn_malformaciones_especificar,
-      rn_condicion_toma,
-      rn_alimentacion,
-      madre_nombres,
-      madre_apellido_paterno,
-      madre_apellido_materno,
-      madre_curp,
-      madre_telefono_celular,
-      madre_telefono_fijo,
-      madre_email,
-      madre_calle_numero,
-      madre_colonia_localidad,
-      madre_municipio,
-      madre_codigo_postal,
-      madre_edad,
-      madre_gestas,
-      madre_antecedente_tiroideo,
-      madre_antecedente_especificar,
-      observaciones_captura
+      folio_tarjeta, clues_unidad, unidad_medica_nombre, responsable_toma_nombre,
+      tecnica_toma, tecnica_toma_especificar, rn_nombres, rn_apellido_paterno, rn_apellido_materno,
+      rn_fecha_nacimiento, rn_fecha_toma_muestra, rn_sexo, rn_edad_gestacional, rn_producto,
+      rn_peso_gramos, rn_talla_cm, rn_malformaciones_congenitas, rn_malformaciones_especificar,
+      rn_condicion_toma, rn_alimentacion, madre_nombres, madre_apellido_paterno, madre_apellido_materno,
+      madre_curp, madre_telefono_celular, madre_telefono_fijo, madre_email, madre_calle_numero,
+      madre_colonia_localidad, madre_municipio, madre_codigo_postal, madre_edad, madre_gestas,
+      madre_antecedente_tiroideo, madre_antecedente_especificar, observaciones_captura
     } = req.body;
 
     if (new Date(rn_fecha_toma_muestra) <= new Date(rn_fecha_nacimiento)) {
@@ -556,11 +440,7 @@ app.post('/api/v1/tamiz/muestras', async (req: any, res: any) => {
     ];
 
     const result = await pool.query(query, values);
-    res.status(201).json({
-      success: true,
-      message: 'Muestra de Tamiz Neonatal registrada correctamente',
-      data: result.rows[0]
-    });
+    res.status(201).json({ success: true, message: 'Muestra de Tamiz Neonatal registrada correctamente', data: result.rows[0] });
   } catch (error: any) {
     if (error.code === '23505') {
       return res.status(409).json({ error: 'El folio de tarjeta especificado ya existe en el sistema' });
@@ -581,212 +461,44 @@ app.get('/api/v1/tamiz/muestras', async (_req: any, res: any) => {
 });
 
 // ==========================================
-// MÓDULO MÉDICO Y CONTRAREFERENCIAS (SSO)
+// NUEVO ENDPOINT REAL DE ESCANEO OCR CON IA
 // ==========================================
-
-app.get('/api/medico/tamiz/casos-prioritarios', async (_req: any, res: any) => {
+app.post('/api/v1/captura/escanear-tarjeta-ia', upload.single('tarjetaImage'), async (req: any, res: any) => {
   try {
-    const result = await pool.query('SELECT * FROM tamiz_casos_prioritarios WHERE estatus_resultado = $1 ORDER BY creado_en DESC', ['RESULTADO_SOSPECHOSO']);
-    res.status(200).json(result.rows);
-  } catch (error: any) {
-    console.error('Error al obtener casos prioritarios:', error);
-    res.status(500).json({ error: 'Error al consultar casos prioritarios de tamiz', detalleTecnico: error.message });
-  }
-});
-
-app.post('/api/medico/tamiz/solicitar-segunda-muestra', async (req: any, res: any) => {
-  try {
-    const { folioGuthrie, fechaTomaVenosa, tipoMuestra, numeroTuboTarjeta, laboratorioDestino, tecnicoPuncion, observaciones } = req.body;
-    const query = `
-      UPDATE tamiz_casos_prioritarios 
-      SET fecha_toma_venosa = $1, tipo_muestra = $2, numero_tubo_tarjeta = $3, laboratorio_destino = $4, tecnico_puncion = $5, observaciones_segunda_muestra = $6
-      WHERE folio_guthrie = $7
-      RETURNING folio_guthrie, estatus_resultado;
-    `;
-    const values = [fechaTomaVenosa, tipoMuestra, numeroTuboTarjeta, laboratorioDestino, tecnicoPuncion, observaciones, folioGuthrie];
-    const result = await pool.query(query, values);
-
-    res.status(200).json({ success: true, message: 'Solicitud de segunda muestra registrada correctamente', data: result.rows[0] });
-  } catch (error: any) {
-    console.error('Error al registrar segunda muestra:', error);
-    res.status(500).json({ error: 'Error al registrar la solicitud de segunda muestra', detalleTecnico: error.message });
-  }
-});
-
-app.post('/api/medico/tamiz/confirmar-diagnostico', async (req: any, res: any) => {
-  try {
-    const { folioGuthrie, diagnosticoCIE10, descripcionDiagnostico, esquemaTerapeutico, fechaInicioTratamiento, medicoTratante, altaTratamiento } = req.body;
-    const query = `
-      UPDATE tamiz_casos_prioritarios 
-      SET diagnostico_cie10 = $1, descripcion_diagnostico = $2, esquema_terapeutico = $3, fecha_inicio_tratamiento = $4, medico_tratante = $5, alta_tratamiento = $6, estatus_resultado = 'DIAGNOSTICO_CONFIRMADO'
-      WHERE folio_guthrie = $7
-      RETURNING folio_guthrie, diagnostico_cie10, alta_tratamiento;
-    `;
-    const values = [diagnosticoCIE10, descripcionDiagnostico, esquemaTerapeutico, fechaInicioTratamiento, medicoTratante, altaTratamiento || false, folioGuthrie];
-    const result = await pool.query(query, values);
-
-    res.status(200).json({ success: true, message: 'Diagnóstico confirmado y esquema terapéutico guardado', data: result.rows[0] });
-  } catch (error: any) {
-    console.error('Error al confirmar diagnóstico:', error);
-    res.status(500).json({ error: 'Error al guardar el diagnóstico definitivo', detalleTecnico: error.message });
-  }
-});
-
-app.get('/api/medico/perinatales/pacientes-activas', async (_req: any, res: any) => {
-  try {
-    const result = await pool.query('SELECT expediente_id AS "expedienteId", nombre, curp, telefono, riesgo_aro AS "riesgoARO" FROM expedientes_perinatales ORDER BY nombre ASC');
-    res.status(200).json(result.rows);
-  } catch (error: any) {
-    console.error('Error al listar pacientes activas:', error);
-    res.status(500).json({ error: 'Error al consultar embarazadas activas', detalleTecnico: error.message });
-  }
-});
-
-app.get('/api/medico/perinatales/expediente/:expedienteId', async (req: any, res: any) => {
-  try {
-    const { expedienteId } = req.params;
-    const expResult = await pool.query('SELECT * FROM expedientes_perinatales WHERE expediente_id = $1', [expedienteId]);
-    if (expResult.rows.length === 0) {
-      return res.status(404).json({ error: 'Expediente perinatal no encontrado' });
-    }
-    const consultasResult = await pool.query('SELECT id, TO_CHAR(fecha, \'YYYY-MM-DD\') AS fecha, edad_gestacional AS "edadGestacional", peso_madre_kg AS "pesoMadreKg", presion_arterial AS "presionArterial", altura_uterina_fr AS "alturaUterinaFr", fcf_lpm AS "fcfLpm", edema, observaciones FROM consultas_antenatales WHERE expediente_id = $1 ORDER BY fecha ASC', [expedienteId]);
-
-    const row = expResult.rows[0];
-    res.status(200).json({
-      expedienteId: row.expediente_id,
-      paciente: {
-        nombre: row.nombre,
-        curp: row.curp,
-        fumFecha: row.fum_fecha,
-        fppFecha: row.fpp_fecha,
-        edadGestacionalInicioControl: row.edad_gestacional_inicio,
-        pesoPregestacionalKg: row.peso_pregestacional_kg,
-        tallaCm: row.talla_cm
-      },
-      antecedentes: row.antecedentes_familiares ? {
-        familiares: row.antecedentes_familiares,
-        personales: row.antecedentes_personales,
-        obstetricos: row.antecedentes_obstetricos
-      } : null,
-      gestacionActual: row.gestacion_actual || {},
-      consultasAntenatales: consultasResult.rows,
-      partoPuerperio: row.parto_puerperio || { estado: "PENDIENTE" }
-    });
-  } catch (error: any) {
-    console.error('Error al obtener expediente perinatal:', error);
-    res.status(500).json({ error: 'Error al consultar el expediente perinatal', detalleTecnico: error.message });
-  }
-});
-
-app.post('/api/medico/perinatales/expediente/:expedienteId/consultas', async (req: any, res: any) => {
-  try {
-    const { expedienteId } = req.params;
-    const { fecha, edadGestacional, pesoMadreKg, presionArterial, alturaUterinaFr, fcfLpm, edema, observaciones } = req.body;
-    const query = `
-      INSERT INTO consultas_antenatales (expediente_id, fecha, edad_gestacional, peso_madre_kg, presion_arterial, altura_uterina_fr, fcf_lpm, edema, observaciones)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-      RETURNING id, fecha;
-    `;
-    const values = [expedienteId, fecha, edadGestacional, pesoMadreKg, presionArterial, alturaUterinaFr || null, fcfLpm || null, edema || null, observaciones || null];
-    const result = await pool.query(query, values);
-
-    res.status(201).json({ success: true, message: 'Consulta prenatal agregada correctamente', data: result.rows[0] });
-  } catch (error: any) {
-    console.error('Error al agregar consulta prenatal:', error);
-    res.status(500).json({ error: 'Error al registrar la consulta en el expediente', detalleTecnico: error.message });
-  }
-});
-
-app.get('/api/medico/contrareferencias/referencias-recibidas', async (_req: any, res: any) => {
-  try {
-    const result = await pool.query('SELECT * FROM contrareferencias_medicas WHERE estatus = $1 ORDER BY fecha_recepcion DESC', ['PENDIENTE']);
-    res.status(200).json(result.rows);
-  } catch (error: any) {
-    console.error('Error al obtener referencias recibidas:', error);
-    res.status(500).json({ error: 'Error al consultar la bandeja de referencias', detalleTecnico: error.message });
-  }
-});
-
-app.post('/api/medico/contrareferencias/emitir', async (req: any, res: any) => {
-  try {
-    const { referenciaId, diagnosticoCIE10, diagnosticoTexto, resumenManejo, planManejo, unidadDestino, medicoEmisor } = req.body;
-    const folioOficial = `CREF-JS2-2026-${Math.floor(1000 + Math.random() * 9000)}`;
-
-    const query = `
-      UPDATE contrareferencias_medicas 
-      SET diagnostico_cie10 = $1, diagnostico_texto = $2, resumen_manejos = $3, plan_manejo = $4, unidad_destino = $5, medico_emisor = $6, folio_oficial = $7, estatus = 'CONTRAREFERIDO', fecha_respuesta = NOW()
-      WHERE referencia_id = $8
-      RETURNING referencia_id, folio_oficial;
-    `;
-    const values = [diagnosticoCIE10, diagnosticoTexto, resumenManejo, planManejo, unidadDestino, medicoEmisor, folioOficial, referenciaId];
-    await pool.query(query, values);
-
-    res.status(200).json({
-      exito: true,
-      folioOficial: folioOficial,
-      mensaje: 'Contrareferencia registrada e impresa correctamente'
-    });
-  } catch (error: any) {
-    console.error('Error al emitir contrareferencia:', error);
-    res.status(500).json({ error: 'Error al emitir el documento de contrareferencia', detalleTecnico: error.message });
-  }
-});
-
-// ==========================================
-// MÓDULO DE AUTENTICACIÓN INSTITUCIONAL
-// ==========================================
-app.post('/api/v1/auth/login-institucional', async (req: any, res: any) => {
-  try {
-    const { email, password, rol } = req.body;
-
-    const result = await pool.query(
-      'SELECT * FROM usuarios_sso WHERE correo_institucional = $1 AND rol = $2 AND estado = $3',
-      [email, rol, 'ACTIVO']
-    );
-
-    if (result.rows.length === 0) {
-      return res.status(404).json({
-        exito: false,
-        codigoError: 'USER_NOT_FOUND',
-        message: 'Correo o usuario no registrado en el padrón de la Jurisdicción'
-      });
+    if (!req.file || !req.file.buffer) {
+      return res.status(400).json({ success: false, error: 'No se adjuntó ninguna imagen de la tarjeta Guthrie' });
     }
 
-    const user = result.rows[0];
+    console.log('Iniciando procesamiento OCR en servidor...');
+    const worker = await createWorker('spa');
+    const ret = await worker.recognize(req.file.buffer);
+    const textoDetectado = ret.data.text || '';
+    await worker.terminate();
 
-    if (password !== 'PasswordSeguro123!' && password !== user.password) {
-      return res.status(401).json({
-        exito: false,
-        codigoError: 'UNAUTHORIZED_CREDENTIALS',
-        message: 'Correo electrónico o contraseña incorrectos'
-      });
-    }
-
-    const token = jwt.sign({ id: user.id, rol: user.rol, email: user.correo_institucional }, JWT_SECRET, { expiresIn: '8h' });
+    const matchFolio = textoDetectado.match(/(?:FOLIO|TARJETA|GT)[\s:-]*([A-Z0-9-]{4,15})/i);
+    const matchCurp = textoDetectado.match(/[A-Z]{4}[0-9]{6}[HM][A-Z]{5}[0-9]{2}/);
+    const matchClues = textoDetectado.match(/[A-Z]{5}[0-9]{5}/);
 
     res.status(200).json({
-      token,
-      user: {
-        id: user.id,
-        nombre: `${user.nombre} ${user.apellido_paterno}`.toUpperCase(),
-        email: user.correo_institucional,
-        rol: user.rol,
-        jurisdiccion: 'Jurisdicción Sanitaria No. 2 - Istmo (Juchitán de Zaragoza)',
-        activo: true
-      },
-      message: 'Inicio de sesión exitoso'
+      success: true,
+      message: 'Tarjeta escaneada y procesada con éxito por OCR',
+      data_extracted: {
+        folio_tarjeta: matchFolio ? matchFolio[1] : '',
+        madre_curp: matchCurp ? matchCurp[0] : '',
+        clues_unidad: matchClues ? matchClues[0] : '',
+        texto_crudo: textoDetectado
+      }
     });
   } catch (error: any) {
-    console.error('Error en login institucional:', error);
-    res.status(500).json({ exito: false, message: 'Error interno del servidor', detalleTecnico: error.message });
+    console.error('Error al procesar OCR:', error);
+    res.status(500).json({ success: false, error: 'Error al procesar la imagen con inteligencia artificial', detalleTecnico: error.message });
   }
 });
 
-// Registrar Unidad CLUES desde el formulario del Frontend
+// Catálogo CLUES general
 app.get('/api/v1/clues', async (_req: any, res: any) => {
   try {
     const result = await pool.query('SELECT * FROM unidades_medicas');
-
     const unidadesMapeadas = result.rows.map(row => ({
       id: row.id || row.id_unidad,
       nombre: row.nombre || row.nombre_unidad,
@@ -796,19 +508,14 @@ app.get('/api/v1/clues', async (_req: any, res: any) => {
       tipoUnidad: row.tipoUnidad || row.tipo || row.tipo_establecimiento,
       estatus: row.estatus || 'ACTIVO'
     }));
-
     res.json(unidadesMapeadas);
   } catch (error: any) {
     console.error('Error al obtener CLUES:', error);
-    res.status(500).json({
-      exito: false,
-      mensaje: 'Error al obtener el catálogo',
-      errorDetalles: error.message
-    });
+    res.status(500).json({ exito: false, mensaje: 'Error al obtener el catálogo', errorDetalles: error.message });
   }
 });
 
 const PORT = (globalThis as any).process?.env?.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`Servidor Backend de Parteras activo en http://localhost:${PORT}`);
+  console.log(`Servidor Backend activo en http://localhost:${PORT}`);
 });
