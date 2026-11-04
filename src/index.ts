@@ -423,6 +423,7 @@ app.put('/api/v1/admin/referencias/:id/contrareferencia', async (req: any, res: 
 
 // ==========================================
 // MÓDULO CAPTURISTA DE TAMIZ NEONATAL
+// (Corregidas las rutas con prefijo /api/v1/)
 // ==========================================
 app.post('/api/v1/tamiz/muestras', async (req: any, res: any) => {
   try {
@@ -491,8 +492,9 @@ app.get('/api/v1/tamiz/muestras', async (_req: any, res: any) => {
 
 // ==========================================
 // MÓDULO MÉDICO Y CONTRAREFERENCIAS (SSO)
+// (Estandarizadas con el prefijo /api/v1/)
 // ==========================================
-app.get('/api/medico/tamiz/casos-prioritarios', async (_req: any, res: any) => {
+app.get('/api/v1/medico/tamiz/casos-prioritarios', async (_req: any, res: any) => {
   try {
     const result = await pool.query('SELECT * FROM tamiz_casos_prioritarios WHERE estatus_resultado = $1 ORDER BY creado_en DESC', ['RESULTADO_SOSPECHOSO']);
     res.status(200).json(result.rows);
@@ -502,7 +504,7 @@ app.get('/api/medico/tamiz/casos-prioritarios', async (_req: any, res: any) => {
   }
 });
 
-app.post('/api/medico/tamiz/solicitar-segunda-muestra', async (req: any, res: any) => {
+app.post('/api/v1/medico/tamiz/solicitar-segunda-muestra', async (req: any, res: any) => {
   try {
     const { folioGuthrie, fechaTomaVenosa, tipoMuestra, numeroTuboTarjeta, laboratorioDestino, tecnicoPuncion, observaciones } = req.body;
     const query = `
@@ -521,7 +523,7 @@ app.post('/api/medico/tamiz/solicitar-segunda-muestra', async (req: any, res: an
   }
 });
 
-app.post('/api/medico/tamiz/confirmar-diagnostico', async (req: any, res: any) => {
+app.post('/api/v1/medico/tamiz/confirmar-diagnostico', async (req: any, res: any) => {
   try {
     const { folioGuthrie, diagnosticoCIE10, descripcionDiagnostico, esquemaTerapeutico, fechaInicioTratamiento, medicoTratante, altaTratamiento } = req.body;
     const query = `
@@ -540,7 +542,7 @@ app.post('/api/medico/tamiz/confirmar-diagnostico', async (req: any, res: any) =
   }
 });
 
-app.get('/api/medico/perinatales/pacientes-activas', async (_req: any, res: any) => {
+app.get('/api/v1/medico/perinatales/pacientes-activas', async (_req: any, res: any) => {
   try {
     const result = await pool.query('SELECT expediente_id AS "expedienteId", nombre, curp, telefono, riesgo_aro AS "riesgoARO" FROM expedientes_perinatales ORDER BY nombre ASC');
     res.status(200).json(result.rows);
@@ -550,7 +552,7 @@ app.get('/api/medico/perinatales/pacientes-activas', async (_req: any, res: any)
   }
 });
 
-app.get('/api/medico/perinatales/expediente/:expedienteId', async (req: any, res: any) => {
+app.get('/api/v1/medico/perinatales/expediente/:expedienteId', async (req: any, res: any) => {
   try {
     const { expedienteId } = req.params;
     const expResult = await pool.query('SELECT * FROM expedientes_perinatales WHERE expediente_id = $1', [expedienteId]);
@@ -586,7 +588,7 @@ app.get('/api/medico/perinatales/expediente/:expedienteId', async (req: any, res
   }
 });
 
-app.post('/api/medico/perinatales/expediente/:expedienteId/consultas', async (req: any, res: any) => {
+app.post('/api/v1/medico/perinatales/expediente/:expedienteId/consultas', async (req: any, res: any) => {
   try {
     const { expedienteId } = req.params;
     const { fecha, edadGestacional, pesoMadreKg, presionArterial, alturaUterinaFr, fcfLpm, edema, observaciones } = req.body;
@@ -605,7 +607,7 @@ app.post('/api/medico/perinatales/expediente/:expedienteId/consultas', async (re
   }
 });
 
-app.get('/api/medico/contrareferencias/referencias-recibidas', async (_req: any, res: any) => {
+app.get('/api/v1/medico/contrareferencias/referencias-recibidas', async (_req: any, res: any) => {
   try {
     const result = await pool.query('SELECT * FROM contrareferencias_medicas WHERE estatus = $1 ORDER BY fecha_recepcion DESC', ['PENDIENTE']);
     res.status(200).json(result.rows);
@@ -615,7 +617,7 @@ app.get('/api/medico/contrareferencias/referencias-recibidas', async (_req: any,
   }
 });
 
-app.post('/api/medico/contrareferencias/emitir', async (req: any, res: any) => {
+app.post('/api/v1/medico/contrareferencias/emitir', async (req: any, res: any) => {
   try {
     const { referenciaId, diagnosticoCIE10, diagnosticoTexto, resumenManejo, planManejo, unidadDestino, medicoEmisor } = req.body;
     const folioOficial = `CREF-JS2-2026-${Math.floor(1000 + Math.random() * 9000)}`;
