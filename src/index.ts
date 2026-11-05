@@ -490,7 +490,7 @@ app.get('/api/v1/tamiz/muestras', async (_req: any, res: any) => {
 });
 
 // ==========================================
-// MÓDULO LOGÍSTICO Y LOTES A LESP (NUEVO)
+// MÓDULO LOGÍSTICO Y LOTES A LESP
 // ==========================================
 app.get('/api/v1/tamiz/lotes', async (_req: any, res: any) => {
   try {
@@ -752,25 +752,55 @@ app.post('/api/v1/auth/login-institucional', async (req: any, res: any) => {
   }
 });
 
-// Catálogo CLUES
+// ==========================================
+// CATÁLOGO CLUES REAL (UNIDADES MÉDICAS)
+// ==========================================
 app.get('/api/v1/clues', async (_req: any, res: any) => {
   try {
-    const result = await pool.query('SELECT * FROM unidades_medicas');
+    const result = await pool.query('SELECT * FROM unidades_medicas ORDER BY nombre_unidad ASC');
     const unidadesMapeadas = result.rows.map(row => ({
       id: row.id || row.id_unidad,
-      nombre: row.nombre || row.nombre_unidad,
-      clues: row.clues || row.clave_clues,
-      municipio: row.municipio,
-      localidad: row.localidad,
-      tipoUnidad: row.tipoUnidad || row.tipo || row.tipo_establecimiento,
+      nombre: row.nombre || row.nombre_unidad || row.nombreUnidad,
+      clues: row.clues || row.clave_clues || row.claveClues,
+      municipio: row.municipio || 'Juchitán de Zaragoza',
+      localidad: row.localidad || row.localidad_agencia || '',
+      jurisdiccion: '02 Istmo',
+      estado: 'Oaxaca',
+      tipoUnidad: row.tipoUnidad || row.tipo || row.tipo_establecimiento || 'CENTRO_SALUD',
       estatus: row.estatus || 'ACTIVO'
     }));
-    res.json(unidadesMapeadas);
+    res.status(200).json(unidadesMapeadas);
   } catch (error: any) {
-    console.error('Error al obtener CLUES:', error);
+    console.error('Error al obtener catálogo CLUES:', error);
     res.status(500).json({
       exito: false,
-      mensaje: 'Error al obtener el catálogo',
+      mensaje: 'Error al obtener el catálogo de unidades médicas',
+      errorDetalles: error.message
+    });
+  }
+});
+
+// Alias compatible para peticiones directas
+app.get('/clues', async (_req: any, res: any) => {
+  try {
+    const result = await pool.query('SELECT * FROM unidades_medicas ORDER BY nombre_unidad ASC');
+    const unidadesMapeadas = result.rows.map(row => ({
+      id: row.id || row.id_unidad,
+      nombre: row.nombre || row.nombre_unidad || row.nombreUnidad,
+      clues: row.clues || row.clave_clues || row.claveClues,
+      municipio: row.municipio || 'Juchitán de Zaragoza',
+      localidad: row.localidad || row.localidad_agencia || '',
+      jurisdiccion: '02 Istmo',
+      estado: 'Oaxaca',
+      tipoUnidad: row.tipoUnidad || row.tipo || row.tipo_establecimiento || 'CENTRO_SALUD',
+      estatus: row.estatus || 'ACTIVO'
+    }));
+    res.status(200).json(unidadesMapeadas);
+  } catch (error: any) {
+    console.error('Error al obtener catálogo CLUES:', error);
+    res.status(500).json({
+      exito: false,
+      mensaje: 'Error al obtener el catálogo de unidades médicas',
       errorDetalles: error.message
     });
   }
