@@ -423,7 +423,6 @@ app.put('/api/v1/admin/referencias/:id/contrareferencia', async (req: any, res: 
 
 // ==========================================
 // MÓDULO CAPTURISTA DE TAMIZ NEONATAL
-// (Corregidas las rutas con prefijo /api/v1/)
 // ==========================================
 app.post('/api/v1/tamiz/muestras', async (req: any, res: any) => {
   try {
@@ -491,8 +490,69 @@ app.get('/api/v1/tamiz/muestras', async (_req: any, res: any) => {
 });
 
 // ==========================================
+// MÓDULO LOGÍSTICO Y LOTES A LESP (NUEVO)
+// ==========================================
+app.get('/api/v1/tamiz/lotes', async (_req: any, res: any) => {
+  try {
+    const result = await pool.query('SELECT * FROM tamiz_lotes ORDER BY creado_en DESC');
+    res.status(200).json(result.rows);
+  } catch (error: any) {
+    console.error('Error al obtener lotes:', error);
+    res.status(500).json({ error: 'Error al consultar lotes de envío', detalleTecnico: error.message });
+  }
+});
+
+app.get('/api/v1/tamiz/muestras-pendientes-lote', async (_req: any, res: any) => {
+  try {
+    const result = await pool.query("SELECT folio_tarjeta AS folio, rn_nombres AS rn, rn_fecha_toma_muestra AS fecha, unidad_medica_nombre AS unidad FROM tamiz_muestras WHERE estatus_muestra = 'REGISTRADO' ORDER BY created_at DESC");
+    res.status(200).json(result.rows);
+  } catch (error: any) {
+    console.error('Error al obtener muestras pendientes:', error);
+    res.status(500).json({ error: 'Error al consultar muestras pendientes', detalleTecnico: error.message });
+  }
+});
+
+app.post('/api/v1/tamiz/lotes', async (req: any, res: any) => {
+  try {
+    const { numeroGuia, transportista, foliosIncluidos, destino } = req.body;
+    const idLote = `LOTE-2026-${Math.floor(1000 + Math.random() * 9000)}`;
+
+    const query = `
+      INSERT INTO tamiz_lotes (id_lote, numero_guia, transportista, cantidad_muestras, destino, estatus)
+      VALUES ($1, $2, $3, $4, $5, 'EN_TRANSITO_LESP')
+      RETURNING *;
+    `;
+    const values = [idLote, numeroGuia, transportista, foliosIncluidos.length, destino];
+    const result = await pool.query(query, values);
+
+    if (foliosIncluidos && foliosIncluidos.length > 0) {
+      await pool.query(
+        "UPDATE tamiz_muestras SET estatus_muestra = 'EN_LOTE_TRANSITO' WHERE folio_tarjeta = ANY($1)",
+        [foliosIncluidos]
+      );
+    }
+
+    res.status(201).json({
+      success: true,
+      message: 'Lote creado con éxito',
+      data: {
+        id: result.rows[0].id_lote,
+        numeroGuia: result.rows[0].numero_guia,
+        transportista: result.rows[0].transportista,
+        cantidadMuestras: result.rows[0].cantidad_muestras,
+        fechaSalida: result.rows[0].creado_en,
+        estatus: result.rows[0].estatus,
+        destino: result.rows[0].destino
+      }
+    });
+  } catch (error: any) {
+    console.error('Error al crear lote:', error);
+    res.status(500).json({ error: 'Error al registrar el lote en el servidor', detalleTecnico: error.message });
+  }
+});
+
+// ==========================================
 // MÓDULO MÉDICO Y CONTRAREFERENCIAS (SSO)
-// (Estandarizadas con el prefijo /api/v1/)
 // ==========================================
 app.get('/api/v1/medico/tamiz/casos-prioritarios', async (_req: any, res: any) => {
   try {
