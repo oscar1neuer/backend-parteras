@@ -552,7 +552,7 @@ app.post('/api/v1/tamiz/lotes', async (req: any, res: any) => {
 });
 
 // ==========================================
-// MÓDULO MÉDICO Y CASOS PRIORITARIOS (BLINDADO A PRUEBA DE FALLOS)
+// MÓDULO MÉDICO Y CASOS PRIORITARIOS (CORREGIDO Y OPTIMIZADO)
 // ==========================================
 const handlerCasosPrioritarios = async (_req: any, res: any) => {
   try {
@@ -569,8 +569,10 @@ const handlerCasosPrioritarios = async (_req: any, res: any) => {
         'TSH / T4 Neonatal' AS "tipoPrueba",
         observaciones_captura AS "valorObtenido",
         '0 - 10 mU/L' AS "valorReferencia",
-        COALESCE(estatus_resultado, 'RESULTADO_SOSPECHOSO') AS "estatusResultado"
+        COALESCE(estatus_resultado, 'RESULTADO_SOSPECHOSO') AS "estatusResultado",
+        created_at AS "fechaCreacion"
       FROM tamiz_muestras 
+      WHERE estatus_resultado IN ('RESULTADO_SOSPECHOSO', 'EN_CONFIRMACION', 'CONFIRMADO_POSITIVO')
       ORDER BY created_at DESC
     `);
     res.status(200).json(result.rows);
@@ -621,17 +623,47 @@ app.post('/medico/tamiz/solicitar-segunda-muestra', handlerSegundaMuestra);
 
 app.post('/api/v1/medico/tamiz/confirmar-diagnostico', async (req: any, res: any) => {
   try {
-    const { folioGuthrie, diagnosticoCIE10, descripcionDiagnostico, esquemaTerapeutico, fechaInicioTratamiento, medicoTratante, altaTratamiento } = req.body;
+    const {
+      folioGuthrie,
+      diagnosticoCIE10,
+      descripcionDiagnostico,
+      esquemaTerapeutico,
+      fechaInicioTratamiento,
+      medicoTratante,
+      altaTratamiento
+    } = req.body;
+
     const query = `
       UPDATE tamiz_muestras 
-      SET estatus_resultado = 'CONFIRMADO_POSITIVO', observaciones_captura = COALESCE(observaciones_captura, '') || ' | Dx: ' || $1 || ' - ' || $2
-      WHERE folio_tarjeta = $3
+      SET 
+        estatus_resultado = 'CONFIRMADO_POSITIVO', 
+        observaciones_captura = COALESCE(observaciones_captura, '') || ' | Dx: ' || $1 || ' - ' || $2 || 
+          ' | Terapéutica: ' || $3 || ' (Inicio: ' || $4 || ', Dr(a). ' || $5 || ', Alta: ' || $6 || ')'
+      WHERE folio_tarjeta = $7
       RETURNING id, folio_tarjeta AS "folioGuthrie", estatus_resultado AS "estatusResultado";
     `;
-    const values = [diagnosticoCIE10, descripcionDiagnostico, esquemaTerapeutico, fechaInicioTratamiento, medicoTratante, altaTratamiento || false, folioGuthrie];
+
+    const values = [
+      diagnosticoCIE10 || 'P00-P96',
+      descripcionDiagnostico || 'Sin descripción',
+      esquemaTerapeutico || 'Pendiente',
+      fechaInicioTratamiento || new Date().toISOString().split('T')[0],
+      medicoTratante || 'Personal Médico JS2',
+      altaTratamiento ? 'Sí' : 'No',
+      folioGuthrie
+    ];
+
     const result = await pool.query(query, values);
 
-    res.status(200).json({ success: true, message: 'Diagnóstico confirmado y esquema terapéutico guardado', data: result.rows[0] });
+    if (result.rows.length === 0) {
+      return res.status(404).json({ success: false, error: 'No se encontró una tarjeta de tamiz con el folio especificado' });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: 'Diagnóstico confirmado y esquema terapéutico guardado correctamente',
+      data: result.rows[0]
+    });
   } catch (error: any) {
     console.error('Error al confirmar diagnóstico:', error);
     res.status(500).json({ error: 'Error al guardar el diagnóstico definitivo', detalleTecnico: error.message });
