@@ -552,7 +552,83 @@ app.post('/api/v1/tamiz/lotes', async (req: any, res: any) => {
 });
 
 // ==========================================
-// MÓDULO MÉDICO Y CASOS PRIORITARIOS (CORREGIDO Y OPTIMIZADO)
+// MÓDULO DE ALERTAS DE RE-TOMA (RECALL)
+// ==========================================
+const handlerAlertasRecall = async (_req: any, res: any) => {
+  try {
+    const result = await pool.query(`
+      SELECT 
+        id, 
+        folio_tarjeta AS folio, 
+        rn_nombres AS rn, 
+        COALESCE(madre_nombres, '') || ' ' || COALESCE(madre_apellido_paterno, '') AS madre, 
+        unidad_medica_nombre AS "unidadMedica", 
+        madre_municipio AS municipio, 
+        madre_telefono_celular AS "telefonoContacto",
+        TO_CHAR(rn_fecha_toma_muestra, 'YYYY-MM-DD') AS "fechaToma",
+        COALESCE(observaciones_captura, 'Muestra Coagulada / Inadecuada') AS "motivoRecall",
+        'CRITICA' AS prioridad
+      FROM tamiz_muestras 
+      WHERE estatus_resultado IN ('RESULTADO_SOSPECHOSO', 'RE_TOMA_RECAL', 'EN_CONFIRMACION') 
+      ORDER BY created_at DESC
+    `);
+    res.status(200).json(result.rows);
+  } catch (error: any) {
+    console.error('Error al obtener alertas de recall:', error);
+    res.status(500).json({ error: 'Error al consultar alertas de recall', detalleTecnico: error.message });
+  }
+};
+
+const handlerNotificarRecall = async (req: any, res: any) => {
+  try {
+    const { casoId, folio, telefono, mensaje } = req.body;
+
+    await pool.query(
+      "UPDATE tamiz_muestras SET observaciones_captura = COALESCE(observaciones_captura, '') || ' | Notificado vía SMS/WA' WHERE id = $1",
+      [casoId]
+    );
+
+    res.status(200).json({
+      success: true,
+      message: `Notificación registrada correctamente para el folio ${folio}`
+    });
+  } catch (error: any) {
+    console.error('Error al registrar notificación:', error);
+    res.status(500).json({ error: 'Error al procesar la notificación', detalleTecnico: error.message });
+  }
+};
+
+const handlerAgendarRetoma = async (req: any, res: any) => {
+  try {
+    const { casoId, folio, unidadMedica } = req.body;
+
+    await pool.query(
+      "UPDATE tamiz_muestras SET estatus_resultado = 'EN_CONFIRMACION', observaciones_captura = COALESCE(observaciones_captura, '') || ' | Re-toma agendada en unidad' WHERE id = $1",
+      [casoId]
+    );
+
+    res.status(200).json({
+      success: true,
+      message: `Re-toma agendada exitosamente para el folio ${folio}`
+    });
+  } catch (error: any) {
+    console.error('Error al agendar re-toma:', error);
+    res.status(500).json({ error: 'Error al agendar la re-toma', detalleTecnico: error.message });
+  }
+};
+
+// Rutas de Recall (compatibles con /api/v1/... y /api/...)
+app.get('/api/v1/tamiz/alertas-recall', handlerAlertasRecall);
+app.get('/api/tamiz/alertas-recall', handlerAlertasRecall);
+
+app.post('/api/v1/tamiz/notificar-recall', handlerNotificarRecall);
+app.post('/api/tamiz/notificar-recall', handlerNotificarRecall);
+
+app.post('/api/v1/tamiz/agendar-retoma', handlerAgendarRetoma);
+app.post('/api/tamiz/agendar-retoma', handlerAgendarRetoma);
+
+// ==========================================
+// MÓDULO MÉDICO Y CASOS PRIORITARIOS
 // ==========================================
 const handlerCasosPrioritarios = async (_req: any, res: any) => {
   try {
@@ -612,7 +688,6 @@ const handlerSegundaMuestra = async (req: any, res: any) => {
   }
 };
 
-// Registrar todas las combinaciones posibles de ruta para evitar 404
 app.get('/api/v1/medico/tamiz/casos-prioritarios', handlerCasosPrioritarios);
 app.get('/api/medico/tamiz/casos-prioritarios', handlerCasosPrioritarios);
 app.get('/medico/tamiz/casos-prioritarios', handlerCasosPrioritarios);
