@@ -780,7 +780,36 @@ app.get('/api/v1/clues', async (_req: any, res: any) => {
   }
 });
 
-// Alias compatible para peticiones directas
+// Registrar nueva unidad médica (POST /api/v1/clues y alias)
+app.post('/api/v1/clues', async (req: any, res: any) => {
+  try {
+    const { claveClues, clues, nombreUnidad, nombre, municipio, localidadAgencia, localidad, tipoEstablecimiento, tipoUnidad } = req.body;
+    const query = `
+      INSERT INTO unidades_medicas (clave_clues, nombre_unidad, municipio, localidad_agencia, tipo_establecimiento)
+      VALUES ($1, $2, $3, $4, $5)
+      RETURNING id, clave_clues, nombre_unidad, estado;
+    `;
+    const values = [
+      claveClues || clues,
+      nombreUnidad || nombre,
+      municipio || 'Juchitán de Zaragoza',
+      localidadAgencia || localidad || null,
+      tipoEstablecimiento || tipoUnidad || 'CENTRO_SALUD'
+    ];
+    const result = await pool.query(query, values);
+
+    res.status(201).json({
+      success: true,
+      message: 'Unidad Médica registrada correctamente en el catálogo CLUES',
+      data: result.rows[0]
+    });
+  } catch (error: any) {
+    console.error('Error al registrar unidad médica en CLUES:', error);
+    res.status(500).json({ error: 'Error al registrar la unidad médica', detalleTecnico: error.message });
+  }
+});
+
+// Alias compatible para peticiones directas GET y POST en /clues
 app.get('/clues', async (_req: any, res: any) => {
   try {
     const result = await pool.query('SELECT * FROM unidades_medicas ORDER BY nombre_unidad ASC');
@@ -803,6 +832,34 @@ app.get('/clues', async (_req: any, res: any) => {
       mensaje: 'Error al obtener el catálogo de unidades médicas',
       errorDetalles: error.message
     });
+  }
+});
+
+app.post('/clues', async (req: any, res: any) => {
+  try {
+    const { claveClues, clues, nombreUnidad, nombre, municipio, localidadAgencia, localidad, tipoEstablecimiento, tipoUnidad } = req.body;
+    const query = `
+      INSERT INTO unidades_medicas (clave_clues, nombre_unidad, municipio, localidad_agencia, tipo_establecimiento)
+      VALUES ($1, $2, $3, $4, $5)
+      RETURNING id, clave_clues, nombre_unidad, estado;
+    `;
+    const values = [
+      claveClues || clues,
+      nombreUnidad || nombre,
+      municipio || 'Juchitán de Zaragoza',
+      localidadAgencia || localidad || null,
+      tipoEstablecimiento || tipoUnidad || 'CENTRO_SALUD'
+    ];
+    const result = await pool.query(query, values);
+
+    res.status(201).json({
+      success: true,
+      message: 'Unidad Médica registrada correctamente en el catálogo CLUES',
+      data: result.rows[0]
+    });
+  } catch (error: any) {
+    console.error('Error al registrar unidad médica en /clues:', error);
+    res.status(500).json({ error: 'Error al registrar la unidad médica', detalleTecnico: error.message });
   }
 });
 
