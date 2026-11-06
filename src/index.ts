@@ -11,7 +11,9 @@ app.use(express.json());
 
 const JWT_SECRET = (globalThis as any).process?.env?.JWT_SECRET || 'secreto_jurisdiccion_2';
 
-// 1. Autenticación unificada de Partera por PIN o Código QR
+// ==========================================
+// MÓDULO DE PARTERAS Y AUTENTICACIÓN
+// ==========================================
 app.post('/api/v1/parteras/login-pin', async (req: any, res: any) => {
   try {
     const { pin, codigo_qr } = req.body;
@@ -51,7 +53,9 @@ app.post('/api/v1/parteras/login-pin', async (req: any, res: any) => {
   }
 });
 
-// 2. Registrar Hoja de Referencia (Envío del Formulario)
+// ==========================================
+// MÓDULO DE REFERENCIAS Y CONTRAREFERENCIAS
+// ==========================================
 app.post('/api/v1/referencias', async (req: any, res: any) => {
   try {
     const { parteraId, centroSalud, usuaria, motivosReferencia, fechaRegistro } = req.body;
@@ -88,7 +92,6 @@ app.post('/api/v1/referencias', async (req: any, res: any) => {
   }
 });
 
-// 3. Obtener Historial de Referencias
 app.get('/api/v1/referencias', async (_req: any, res: any) => {
   try {
     const query = `
@@ -105,7 +108,6 @@ app.get('/api/v1/referencias', async (_req: any, res: any) => {
   }
 });
 
-// 4. Responder Contrareferencia Médica
 app.post('/api/v1/referencias/:id/contrareferencia', async (req: any, res: any) => {
   try {
     const { id } = req.params;
@@ -132,7 +134,9 @@ app.post('/api/v1/referencias/:id/contrareferencia', async (req: any, res: any) 
   }
 });
 
-// 5. Registrar Calendario de Atención al Niño(a)
+// ==========================================
+// MÓDULOS DE CALENDARIOS COMUNITARIOS
+// ==========================================
 app.post('/api/v1/calendario-nino', async (req: any, res: any) => {
   try {
     const { parteraId, datosNino, estadoNutricional, tipoLactancia, canalizaciones, cierreAdministrativo } = req.body;
@@ -177,7 +181,6 @@ app.post('/api/v1/calendario-nino', async (req: any, res: any) => {
   }
 });
 
-// 6. Registrar Calendario de Atención a la Mujer
 app.post('/api/v1/calendario-mujer', async (req: any, res: any) => {
   try {
     const { parteraId, datosUsuaria, controlPrenatal, embarazoComplicaciones, complicacionesHemorragicas, partoNormal, partoComplicado, puerperio, alertaMuerteMaterna, cierreAdministrativo } = req.body;
@@ -955,9 +958,9 @@ app.get('/api/v1/admin/referencias', handlerGetReferenciasAdmin);
 app.patch('/api/v1/admin/referencias/:id/contrareferencia', handlerPatchContrareferenciaAdmin);
 
 // ==========================================
-// MÓDULO DE EXPEDIENTE PERINATAL (CARNÉ CLAP)
+// MÓDULO DE EXPEDIENTE PERINATAL (CARNÉ CLAP) - CON RUTAS DUALES SOPORTADAS
 // ==========================================
-app.get('/api/medico/perinatales/pacientes-activas', async (_req: any, res: any) => {
+const handlerGetPacientesActivas = async (_req: any, res: any) => {
   try {
     const result = await pool.query(`
       SELECT 
@@ -984,9 +987,9 @@ app.get('/api/medico/perinatales/pacientes-activas', async (_req: any, res: any)
     console.warn('Aviso: Tabla expedientes_perinatales no encontrada o vacía, retornando datos vacíos:', error.message);
     res.status(200).json([]);
   }
-});
+};
 
-app.get('/api/medico/perinatales/expediente/:id', async (req: any, res: any) => {
+const handlerGetExpedienteId = async (req: any, res: any) => {
   try {
     const { id } = req.params;
     const expResult = await pool.query('SELECT * FROM expedientes_perinatales WHERE id = $1', [id]);
@@ -1053,9 +1056,9 @@ app.get('/api/medico/perinatales/expediente/:id', async (req: any, res: any) => 
     console.error('Error al obtener expediente perinatal:', error);
     res.status(500).json({ error: 'Error al consultar el expediente', detalleTecnico: error.message });
   }
-});
+};
 
-app.post('/api/medico/perinatales/expediente/:id/consultas', async (req: any, res: any) => {
+const handlerPostConsultaAntenatal = async (req: any, res: any) => {
   try {
     const { id } = req.params;
     const { fecha, edadGestacional, pesoMadreKg, presionArterial, alturaUterinaFr, fcfLpm, edema, observaciones } = req.body;
@@ -1086,9 +1089,9 @@ app.post('/api/medico/perinatales/expediente/:id/consultas', async (req: any, re
     console.error('Error al registrar consulta antenatal:', error);
     res.status(500).json({ error: 'Error al registrar la consulta', detalleTecnico: error.message });
   }
-});
+};
 
-app.put('/api/medico/perinatales/expediente/:id/antecedentes', async (req: any, res: any) => {
+const handlerPutAntecedentes = async (req: any, res: any) => {
   try {
     const { id } = req.params;
     const { antecedentesFamiliares, antecedentesPersonales, antecedentesObstetricos, criteriosARO, riesgoARO } = req.body;
@@ -1112,9 +1115,9 @@ app.put('/api/medico/perinatales/expediente/:id/antecedentes', async (req: any, 
     console.error('Error al actualizar antecedentes:', error);
     res.status(500).json({ error: 'Error al actualizar antecedentes', detalleTecnico: error.message });
   }
-});
+};
 
-app.put('/api/medico/perinatales/expediente/:id/laboratorios', async (req: any, res: any) => {
+const handlerPutLaboratorios = async (req: any, res: any) => {
   try {
     const { id } = req.params;
     const { grupoSanguineo, factorRh, vihSerologia, vdrlSerologia, vacunaTetanos, vacunaDosis2 } = req.body;
@@ -1131,9 +1134,9 @@ app.put('/api/medico/perinatales/expediente/:id/laboratorios', async (req: any, 
     console.error('Error al actualizar laboratorios:', error);
     res.status(500).json({ error: 'Error al actualizar laboratorios', detalleTecnico: error.message });
   }
-});
+};
 
-app.post('/api/medico/perinatales/expediente/:id/parto', async (req: any, res: any) => {
+const handlerPostParto = async (req: any, res: any) => {
   try {
     const { id } = req.params;
     const { fechaHoraNacimiento, tipoPartoParto, semanasParto, apgar1, apgar5, pesoRNGramos, tallaRNCm, folioGuthrie } = req.body;
@@ -1168,7 +1171,21 @@ app.post('/api/medico/perinatales/expediente/:id/parto', async (req: any, res: a
     console.error('Error al registrar evento de parto:', error);
     res.status(500).json({ error: 'Error al registrar el parto', detalleTecnico: error.message });
   }
-});
+};
+
+// Mapeador de rutas perinatales (Soporta /api/..., /api/v1/... y sin prefijo)
+const registrarRutasPerinatales = (prefix: string) => {
+  app.get(`${prefix}/medico/perinatales/pacientes-activas`, handlerGetPacientesActivas);
+  app.get(`${prefix}/medico/perinatales/expediente/:id`, handlerGetExpedienteId);
+  app.post(`${prefix}/medico/perinatales/expediente/:id/consultas`, handlerPostConsultaAntenatal);
+  app.put(`${prefix}/medico/perinatales/expediente/:id/antecedentes`, handlerPutAntecedentes);
+  app.put(`${prefix}/medico/perinatales/expediente/:id/laboratorios`, handlerPutLaboratorios);
+  app.post(`${prefix}/medico/perinatales/expediente/:id/parto`, handlerPostParto);
+};
+
+registrarRutasPerinatales('/api');
+registrarRutasPerinatales('/api/v1');
+registrarRutasPerinatales('');
 
 // ==========================================
 // MÓDULO DE AUTENTICACIÓN INSTITUCIONAL
