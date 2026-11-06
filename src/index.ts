@@ -610,6 +610,7 @@ const handlerSegundaMuestra = async (req: any, res: any) => {
   }
 };
 
+
 // Registrar todas las combinaciones posibles de ruta para evitar 404
 app.get('/api/v1/medico/tamiz/casos-prioritarios', handlerCasosPrioritarios);
 app.get('/api/medico/tamiz/casos-prioritarios', handlerCasosPrioritarios);
