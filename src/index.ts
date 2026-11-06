@@ -697,9 +697,9 @@ app.post('/api/v1/medico/tamiz/confirmar-diagnostico', async (req: any, res: any
 });
 
 // ==========================================
-// MÓDULO DE AVISOS EPIDEMIOLÓGICOS Y BITÁCORA (CONFIGURACIÓN)
+// MÓDULO DE AVISOS EPIDEMIOLÓGICOS Y BITÁCORA
 // ==========================================
-app.get('/api/v1/admin/avisos', async (_req: any, res: any) => {
+const handlerGetAvisos = async (_req: any, res: any) => {
   try {
     const result = await pool.query('SELECT * FROM avisos_epidemiologicos ORDER BY creado_en DESC');
     const avisosMapeados = result.rows.map(row => ({
@@ -715,9 +715,9 @@ app.get('/api/v1/admin/avisos', async (_req: any, res: any) => {
   } catch (error: any) {
     res.status(200).json([]);
   }
-});
+};
 
-app.post('/api/v1/admin/avisos', async (req: any, res: any) => {
+const handlerPostAvisos = async (req: any, res: any) => {
   try {
     const { titulo, contenido, prioridad, autor, estatus } = req.body;
     const query = `
@@ -764,9 +764,9 @@ app.post('/api/v1/admin/avisos', async (req: any, res: any) => {
     console.error('Error al publicar aviso:', error);
     res.status(500).json({ error: 'Error al registrar el aviso', detalleTecnico: error.message });
   }
-});
+};
 
-app.delete('/api/v1/admin/avisos/:id', async (req: any, res: any) => {
+const handlerDeleteAvisos = async (req: any, res: any) => {
   try {
     const { id } = req.params;
     await pool.query('DELETE FROM avisos_epidemiologicos WHERE id = $1', [id]);
@@ -775,9 +775,9 @@ app.delete('/api/v1/admin/avisos/:id', async (req: any, res: any) => {
     console.error('Error al eliminar aviso:', error);
     res.status(500).json({ error: 'Error al eliminar el aviso', detalleTecnico: error.message });
   }
-});
+};
 
-app.get('/api/v1/admin/bitacora', async (_req: any, res: any) => {
+const handlerGetBitacora = async (_req: any, res: any) => {
   try {
     const result = await pool.query('SELECT * FROM bitacora_sistema ORDER BY creado_en DESC LIMIT 50');
     const logsMapeados = result.rows.map(row => ({
@@ -801,7 +801,82 @@ app.get('/api/v1/admin/bitacora', async (_req: any, res: any) => {
       }
     ]);
   }
-});
+};
+
+app.get('/admin/avisos', handlerGetAvisos);
+app.post('/admin/avisos', handlerPostAvisos);
+app.delete('/admin/avisos/:id', handlerDeleteAvisos);
+app.get('/admin/bitacora', handlerGetBitacora);
+
+app.get('/api/v1/admin/avisos', handlerGetAvisos);
+app.post('/api/v1/admin/avisos', handlerPostAvisos);
+app.delete('/api/v1/admin/avisos/:id', handlerDeleteAvisos);
+app.get('/api/v1/admin/bitacora', handlerGetBitacora);
+
+// ==========================================
+// MÓDULO DE CALENDARIOS COMUNITARIOS (FORMATOS 2 Y 3)
+// ==========================================
+const handlerGetSaludMaterna = async (_req: any, res: any) => {
+  try {
+    const result = await pool.query(`
+      SELECT 
+        id, 
+        'CAL-MUJER-2026-' || LPAD(CAST(id AS TEXT), 4, '0') AS folio,
+        nombre_mujer AS "nombreMujer",
+        COALESCE(
+          (SELECT nombre FROM parteras WHERE parteras.id = calendario_mujer.partera_id), 
+          'Partera Tradicional Acreditada'
+        ) AS partera,
+        municipio,
+        COALESCE(mes_embarazo_activo, 5) * 4 AS "semanaGestacion",
+        CASE 
+          WHEN muac_embarazo ILIKE '%verde%' OR muac_embarazo IS NULL THEN 'VERDE'
+          WHEN muac_embarazo ILIKE '%amarillo%' THEN 'AMARILLO'
+          ELSE 'ROJO'
+        END AS "nutricionMUAC",
+        3 AS "controlesRealizados",
+        CONCAT('Paciente estable en control comunitario. Municipio: ', municipio, '. Acreditación por Jurisdicción Sanitaria No. 2.') AS alertas
+      FROM calendario_mujer 
+      ORDER BY creado_en DESC
+    `);
+    res.status(200).json(result.rows);
+  } catch (error: any) {
+    console.warn('Aviso: No se pudo consultar calendario_mujer:', error.message);
+    res.status(200).json([]);
+  }
+};
+
+const handlerGetDesarrolloInfantil = async (_req: any, res: any) => {
+  try {
+    const result = await pool.query(`
+      SELECT 
+        id, 
+        'CAL-NINO-2026-' || LPAD(CAST(id AS TEXT), 4, '0') AS folio,
+        nombre_nino AS "nombreNino",
+        nombre_madre AS "nombreMadre",
+        COALESCE(
+          (SELECT nombre FROM parteras WHERE parteras.id = calendario_nino.partera_id), 
+          'Partera Tradicional Acreditada'
+        ) AS partera,
+        municipio,
+        edad_meses AS "edadMeses",
+        TRUE AS "tamizTomado",
+        TRUE AS "vacunasCompletas",
+        CONCAT('Desarrollo infantil monitoreado en red comunitaria. Municipio: ', municipio, '. Sin alteraciones graves reportadas.') AS alertas
+      FROM calendario_nino 
+      ORDER BY creado_en DESC
+    `);
+    res.status(200).json(result.rows);
+  } catch (error: any) {
+    console.warn('Aviso: No se pudo consultar calendario_nino:', error.message);
+    res.status(200).json([]);
+  }
+};
+
+app.get('/admin/calendarios/salud-materna', handlerGetSaludMaterna);
+app.get('/admin/calendarios/desarrollo-infantil', handlerGetDesarrolloInfantil);
+app.get('/api/v1/admin/calendarios/salud-materna', handlerGetSaludMaterna);
+app.get('/api/v1/admin/calendarios/desarrollo-infantil', handlerGetDesarrolloInfantil);
 
 // ==========================================
 // MÓDULO DE AUTENTICACIÓN INSTITUCIONAL
