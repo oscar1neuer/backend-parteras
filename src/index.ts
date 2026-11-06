@@ -552,9 +552,9 @@ app.post('/api/v1/tamiz/lotes', async (req: any, res: any) => {
 });
 
 // ==========================================
-// MÓDULO MÉDICO Y CONTRAREFERENCIAS (SSO) — CASOS PRIORITARIOS CORREGIDOS
+// MÓDULO MÉDICO Y CASOS PRIORITARIOS (CON ALIAS /v1 Y SIN /v1)
 // ==========================================
-app.get('/api/v1/medico/tamiz/casos-prioritarios', async (_req: any, res: any) => {
+const handlerCasosPrioritarios = async (_req: any, res: any) => {
   try {
     const result = await pool.query(`
       SELECT 
@@ -578,9 +578,9 @@ app.get('/api/v1/medico/tamiz/casos-prioritarios', async (_req: any, res: any) =
     console.error('Error al obtener casos prioritarios:', error);
     res.status(500).json({ error: 'Error al consultar casos prioritarios de tamiz', detalleTecnico: error.message });
   }
-});
+};
 
-app.post('/api/v1/medico/tamiz/solicitar-segunda-muestra', async (req: any, res: any) => {
+const handlerSegundaMuestra = async (req: any, res: any) => {
   try {
     const { casoId, tipoMuestra, laboratorioDestino } = req.body;
 
@@ -608,7 +608,14 @@ app.post('/api/v1/medico/tamiz/solicitar-segunda-muestra', async (req: any, res:
     console.error('Error al registrar segunda muestra:', error);
     res.status(500).json({ error: 'Error al registrar la solicitud de segunda muestra', detalleTecnico: error.message });
   }
-});
+};
+
+// Rutas con /api/v1/... y sin /v1 para compatibilidad total con el frontend
+app.get('/api/v1/medico/tamiz/casos-prioritarios', handlerCasosPrioritarios);
+app.get('/api/medico/tamiz/casos-prioritarios', handlerCasosPrioritarios);
+
+app.post('/api/v1/medico/tamiz/solicitar-segunda-muestra', handlerSegundaMuestra);
+app.post('/api/medico/tamiz/solicitar-segunda-muestra', handlerSegundaMuestra);
 
 app.post('/api/v1/medico/tamiz/confirmar-diagnostico', async (req: any, res: any) => {
   try {
@@ -782,7 +789,7 @@ app.post('/api/v1/auth/login-institucional', async (req: any, res: any) => {
 // ==========================================
 // CATÁLOGO CLUES REAL (UNIDADES MÉDICAS)
 // ==========================================
-app.get('/api/v1/clues', async (_req: any, res: any) => {
+const handlerGetClues = async (_req: any, res: any) => {
   try {
     const result = await pool.query('SELECT * FROM unidades_medicas ORDER BY nombre_unidad ASC');
     const unidadesMapeadas = result.rows.map(row => ({
@@ -805,9 +812,9 @@ app.get('/api/v1/clues', async (_req: any, res: any) => {
       errorDetalles: error.message
     });
   }
-});
+};
 
-app.post('/api/v1/clues', async (req: any, res: any) => {
+const handlerPostClues = async (req: any, res: any) => {
   try {
     const { claveClues, clues, nombreUnidad, nombre, municipio, localidadAgencia, localidad, tipoEstablecimiento, tipoUnidad } = req.body;
     const query = `
@@ -833,60 +840,12 @@ app.post('/api/v1/clues', async (req: any, res: any) => {
     console.error('Error al registrar unidad médica en CLUES:', error);
     res.status(500).json({ error: 'Error al registrar la unidad médica', detalleTecnico: error.message });
   }
-});
+};
 
-app.get('/clues', async (_req: any, res: any) => {
-  try {
-    const result = await pool.query('SELECT * FROM unidades_medicas ORDER BY nombre_unidad ASC');
-    const unidadesMapeadas = result.rows.map(row => ({
-      id: row.id || row.id_unidad,
-      nombre: row.nombre || row.nombre_unidad || row.nombreUnidad,
-      clues: row.clues || row.clave_clues || row.claveClues,
-      municipio: row.municipio || 'Juchitán de Zaragoza',
-      localidad: row.localidad || row.localidad_agencia || '',
-      jurisdiccion: '02 Istmo',
-      estado: 'Oaxaca',
-      tipoUnidad: row.tipoUnidad || row.tipo || row.tipo_establecimiento || 'CENTRO_SALUD',
-      estatus: row.estatus || 'ACTIVO'
-    }));
-    res.status(200).json(unidadesMapeadas);
-  } catch (error: any) {
-    console.error('Error al obtener catálogo CLUES:', error);
-    res.status(500).json({
-      exito: false,
-      mensaje: 'Error al obtener el catálogo de unidades médicas',
-      errorDetalles: error.message
-    });
-  }
-});
-
-app.post('/clues', async (req: any, res: any) => {
-  try {
-    const { claveClues, clues, nombreUnidad, nombre, municipio, localidadAgencia, localidad, tipoEstablecimiento, tipoUnidad } = req.body;
-    const query = `
-      INSERT INTO unidades_medicas (clave_clues, nombre_unidad, municipio, localidad_agencia, tipo_establecimiento)
-      VALUES ($1, $2, $3, $4, $5)
-      RETURNING id, clave_clues, nombre_unidad, estado;
-    `;
-    const values = [
-      claveClues || clues,
-      nombreUnidad || nombre,
-      municipio || 'Juchitán de Zaragoza',
-      localidadAgencia || localidad || null,
-      tipoEstablecimiento || tipoUnidad || 'CENTRO_SALUD'
-    ];
-    const result = await pool.query(query, values);
-
-    res.status(201).json({
-      success: true,
-      message: 'Unidad Médica registrada correctamente en el catálogo CLUES',
-      data: result.rows[0]
-    });
-  } catch (error: any) {
-    console.error('Error al registrar unidad médica en /clues:', error);
-    res.status(500).json({ error: 'Error al registrar la unidad médica', detalleTecnico: error.message });
-  }
-});
+app.get('/api/v1/clues', handlerGetClues);
+app.post('/api/v1/clues', handlerPostClues);
+app.get('/clues', handlerGetClues);
+app.post('/clues', handlerPostClues);
 
 const PORT = (globalThis as any).process?.env?.PORT || 3000;
 app.listen(PORT, () => {
