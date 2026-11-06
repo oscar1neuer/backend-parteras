@@ -450,10 +450,10 @@ app.post('/api/v1/tamiz/muestras', async (req: any, res: any) => {
         rn_condicion_toma, rn_alimentacion, madre_nombres, madre_apellido_paterno, madre_apellido_materno,
         madre_curp, madre_telefono_celular, madre_telefono_fijo, madre_email, madre_calle_numero,
         madre_colonia_localidad, madre_municipio, madre_codigo_postal, madre_edad, madre_gestas,
-        madre_antecedente_tiroideo, madre_antecedente_especificar, observaciones_captura
+        madre_antecedente_tiroideo, madre_antecedente_especificar, observaciones_captura, estatus_resultado
       ) VALUES (
         $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20,
-        $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36
+        $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, 'RESULTADO_SOSPECHOSO'
       ) RETURNING id, folio_tarjeta, estatus_muestra, created_at;
     `;
 
@@ -552,11 +552,27 @@ app.post('/api/v1/tamiz/lotes', async (req: any, res: any) => {
 });
 
 // ==========================================
-// MÓDULO MÉDICO Y CONTRAREFERENCIAS (SSO)
+// MÓDULO MÉDICO Y CONTRAREFERENCIAS (SSO) — CASOS PRIORITARIOS CORREGIDOS
 // ==========================================
 app.get('/api/v1/medico/tamiz/casos-prioritarios', async (_req: any, res: any) => {
   try {
-    const result = await pool.query('SELECT * FROM tamiz_casos_prioritarios WHERE estatus_resultado = $1 ORDER BY creado_en DESC', ['RESULTADO_SOSPECHOSO']);
+    const result = await pool.query(`
+      SELECT 
+        id, 
+        folio_tarjeta AS folio, 
+        rn_nombres AS "nombreRN", 
+        COALESCE(madre_nombres, '') || ' ' || COALESCE(madre_apellido_paterno, '') AS "nombreMadre", 
+        clues_unidad AS clues, 
+        unidad_medica_nombre AS "unidadMedica", 
+        madre_municipio AS municipio, 
+        madre_telefono_celular AS "telefonoContacto",
+        'TSH / T4 Neonatal' AS "tipoPrueba",
+        observaciones_captura AS "valorObtenido",
+        '0 - 10 mU/L' AS "valorReferencia",
+        COALESCE(estatus_resultado, 'RESULTADO_SOSPECHOSO') AS "estatusResultado"
+      FROM tamiz_muestras 
+      ORDER BY created_at DESC
+    `);
     res.status(200).json(result.rows);
   } catch (error: any) {
     console.error('Error al obtener casos prioritarios:', error);
@@ -566,17 +582,28 @@ app.get('/api/v1/medico/tamiz/casos-prioritarios', async (_req: any, res: any) =
 
 app.post('/api/v1/medico/tamiz/solicitar-segunda-muestra', async (req: any, res: any) => {
   try {
-    const { folioGuthrie, fechaTomaVenosa, tipoMuestra, numeroTuboTarjeta, laboratorioDestino, tecnicoPuncion, observaciones } = req.body;
+    const { casoId, tipoMuestra, laboratorioDestino } = req.body;
+
     const query = `
-      UPDATE tamiz_casos_prioritarios 
-      SET fecha_toma_venosa = $1, tipo_muestra = $2, numero_tubo_tarjeta = $3, laboratorio_destino = $4, tecnico_puncion = $5, observaciones_segunda_muestra = $6
-      WHERE folio_guthrie = $7
-      RETURNING folio_guthrie, estatus_resultado;
+      UPDATE tamiz_muestras 
+      SET 
+        estatus_resultado = 'EN_CONFIRMACION',
+        observaciones_captura = COALESCE(observaciones_captura, '') || ' | 2ª Muestra: ' || $1 || ' (Lab: ' || $2 || ')'
+      WHERE id = $3
+      RETURNING id, folio_tarjeta AS folio, estatus_resultado AS "estatusResultado";
     `;
-    const values = [fechaTomaVenosa, tipoMuestra, numeroTuboTarjeta, laboratorioDestino, tecnicoPuncion, observaciones, folioGuthrie];
+    const values = [tipoMuestra || 'TALON_RETOMA', laboratorioDestino || 'LESP Oaxaca', casoId];
     const result = await pool.query(query, values);
 
-    res.status(200).json({ success: true, message: 'Solicitud de segunda muestra registrada correctamente', data: result.rows[0] });
+    if (result.rows.length === 0) {
+      return res.status(404).json({ success: false, message: 'Caso no encontrado en el sistema' });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: 'Solicitud de segunda muestra registrada correctamente',
+      data: result.rows[0]
+    });
   } catch (error: any) {
     console.error('Error al registrar segunda muestra:', error);
     res.status(500).json({ error: 'Error al registrar la solicitud de segunda muestra', detalleTecnico: error.message });
@@ -587,10 +614,10 @@ app.post('/api/v1/medico/tamiz/confirmar-diagnostico', async (req: any, res: any
   try {
     const { folioGuthrie, diagnosticoCIE10, descripcionDiagnostico, esquemaTerapeutico, fechaInicioTratamiento, medicoTratante, altaTratamiento } = req.body;
     const query = `
-      UPDATE tamiz_casos_prioritarios 
-      SET diagnostico_cie10 = $1, descripcion_diagnostico = $2, esquema_terapeutico = $3, fecha_inicio_tratamiento = $4, medico_tratante = $5, alta_tratamiento = $6, estatus_resultado = 'DIAGNOSTICO_CONFIRMADO'
-      WHERE folio_guthrie = $7
-      RETURNING folio_guthrie, diagnostico_cie10, alta_tratamiento;
+      UPDATE tamiz_muestras 
+      SET estatus_resultado = 'CONFIRMADO_POSITIVO', observaciones_captura = COALESCE(observaciones_captura, '') || ' | Dx: ' || $1 || ' - ' || $2
+      WHERE folio_tarjeta = $3
+      RETURNING id, folio_tarjeta AS "folioGuthrie", estatus_resultado AS "estatusResultado";
     `;
     const values = [diagnosticoCIE10, descripcionDiagnostico, esquemaTerapeutico, fechaInicioTratamiento, medicoTratante, altaTratamiento || false, folioGuthrie];
     const result = await pool.query(query, values);
@@ -780,7 +807,6 @@ app.get('/api/v1/clues', async (_req: any, res: any) => {
   }
 });
 
-// Registrar nueva unidad médica (POST /api/v1/clues y alias)
 app.post('/api/v1/clues', async (req: any, res: any) => {
   try {
     const { claveClues, clues, nombreUnidad, nombre, municipio, localidadAgencia, localidad, tipoEstablecimiento, tipoUnidad } = req.body;
@@ -809,7 +835,6 @@ app.post('/api/v1/clues', async (req: any, res: any) => {
   }
 });
 
-// Alias compatible para peticiones directas GET y POST en /clues
 app.get('/clues', async (_req: any, res: any) => {
   try {
     const result = await pool.query('SELECT * FROM unidades_medicas ORDER BY nombre_unidad ASC');
