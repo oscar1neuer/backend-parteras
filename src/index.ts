@@ -552,7 +552,7 @@ app.post('/api/v1/tamiz/lotes', async (req: any, res: any) => {
 });
 
 // ==========================================
-// MÓDULO MÉDICO Y CASOS PRIORITARIOS (CON ALIAS /v1 Y SIN /v1)
+// MÓDULO MÉDICO Y CASOS PRIORITARIOS (CON Y SIN /v1 / API)
 // ==========================================
 const handlerCasosPrioritarios = async (_req: any, res: any) => {
   try {
@@ -610,12 +610,14 @@ const handlerSegundaMuestra = async (req: any, res: any) => {
   }
 };
 
-// Rutas con /api/v1/... y sin /v1 para compatibilidad total con el frontend
+// Registrar todas las combinaciones posibles de ruta para evitar 404
 app.get('/api/v1/medico/tamiz/casos-prioritarios', handlerCasosPrioritarios);
 app.get('/api/medico/tamiz/casos-prioritarios', handlerCasosPrioritarios);
+app.get('/medico/tamiz/casos-prioritarios', handlerCasosPrioritarios);
 
 app.post('/api/v1/medico/tamiz/solicitar-segunda-muestra', handlerSegundaMuestra);
 app.post('/api/medico/tamiz/solicitar-segunda-muestra', handlerSegundaMuestra);
+app.post('/medico/tamiz/solicitar-segunda-muestra', handlerSegundaMuestra);
 
 app.post('/api/v1/medico/tamiz/confirmar-diagnostico', async (req: any, res: any) => {
   try {
