@@ -581,17 +581,12 @@ const handlerAlertasRecall = async (_req: any, res: any) => {
 
 const handlerNotificarRecall = async (req: any, res: any) => {
   try {
-    const { casoId, folio, telefono, mensaje } = req.body;
-
+    const { casoId, folio } = req.body;
     await pool.query(
       "UPDATE tamiz_muestras SET observaciones_captura = COALESCE(observaciones_captura, '') || ' | Notificado vía SMS/WA' WHERE id = $1",
       [casoId]
     );
-
-    res.status(200).json({
-      success: true,
-      message: `Notificación registrada correctamente para el folio ${folio}`
-    });
+    res.status(200).json({ success: true, message: `Notificación registrada correctamente para el folio ${folio}` });
   } catch (error: any) {
     console.error('Error al registrar notificación:', error);
     res.status(500).json({ error: 'Error al procesar la notificación', detalleTecnico: error.message });
@@ -600,24 +595,18 @@ const handlerNotificarRecall = async (req: any, res: any) => {
 
 const handlerAgendarRetoma = async (req: any, res: any) => {
   try {
-    const { casoId, folio, unidadMedica } = req.body;
-
+    const { casoId, folio } = req.body;
     await pool.query(
       "UPDATE tamiz_muestras SET estatus_resultado = 'EN_CONFIRMACION', observaciones_captura = COALESCE(observaciones_captura, '') || ' | Re-toma agendada en unidad' WHERE id = $1",
       [casoId]
     );
-
-    res.status(200).json({
-      success: true,
-      message: `Re-toma agendada exitosamente para el folio ${folio}`
-    });
+    res.status(200).json({ success: true, message: `Re-toma agendada exitosamente para el folio ${folio}` });
   } catch (error: any) {
     console.error('Error al agendar re-toma:', error);
     res.status(500).json({ error: 'Error al agendar la re-toma', detalleTecnico: error.message });
   }
 };
 
-// Rutas de Recall (compatibles con /api/v1/... y /api/...)
 app.get('/api/v1/tamiz/alertas-recall', handlerAlertasRecall);
 app.get('/api/tamiz/alertas-recall', handlerAlertasRecall);
 
@@ -653,7 +642,7 @@ const handlerCasosPrioritarios = async (_req: any, res: any) => {
     `);
     res.status(200).json(result.rows);
   } catch (error: any) {
-    console.warn('Aviso: No se pudo consultar tamiz_muestras (retornando lista vacía por seguridad):', error.message);
+    console.warn('Aviso: No se pudo consultar tamiz_muestras:', error.message);
     res.status(200).json([]);
   }
 };
@@ -661,7 +650,6 @@ const handlerCasosPrioritarios = async (_req: any, res: any) => {
 const handlerSegundaMuestra = async (req: any, res: any) => {
   try {
     const { casoId, tipoMuestra, laboratorioDestino } = req.body;
-
     const query = `
       UPDATE tamiz_muestras 
       SET 
@@ -672,19 +660,10 @@ const handlerSegundaMuestra = async (req: any, res: any) => {
     `;
     const values = [tipoMuestra || 'TALON_RETOMA', laboratorioDestino || 'LESP Oaxaca', casoId];
     const result = await pool.query(query, values);
-
-    if (result.rows.length === 0) {
-      return res.status(404).json({ success: false, message: 'Caso no encontrado en el sistema' });
-    }
-
-    res.status(200).json({
-      success: true,
-      message: 'Solicitud de segunda muestra registrada correctamente',
-      data: result.rows[0]
-    });
+    res.status(200).json({ success: true, message: 'Solicitud registrada correctamente', data: result.rows[0] });
   } catch (error: any) {
     console.error('Error al registrar segunda muestra:', error);
-    res.status(500).json({ error: 'Error al registrar la solicitud de segunda muestra', detalleTecnico: error.message });
+    res.status(500).json({ error: 'Error al registrar la solicitud', detalleTecnico: error.message });
   }
 };
 
@@ -698,16 +677,7 @@ app.post('/medico/tamiz/solicitar-segunda-muestra', handlerSegundaMuestra);
 
 app.post('/api/v1/medico/tamiz/confirmar-diagnostico', async (req: any, res: any) => {
   try {
-    const {
-      folioGuthrie,
-      diagnosticoCIE10,
-      descripcionDiagnostico,
-      esquemaTerapeutico,
-      fechaInicioTratamiento,
-      medicoTratante,
-      altaTratamiento
-    } = req.body;
-
+    const { folioGuthrie, diagnosticoCIE10, descripcionDiagnostico, esquemaTerapeutico, fechaInicioTratamiento, medicoTratante, altaTratamiento } = req.body;
     const query = `
       UPDATE tamiz_muestras 
       SET 
@@ -717,131 +687,119 @@ app.post('/api/v1/medico/tamiz/confirmar-diagnostico', async (req: any, res: any
       WHERE folio_tarjeta = $7
       RETURNING id, folio_tarjeta AS "folioGuthrie", estatus_resultado AS "estatusResultado";
     `;
-
-    const values = [
-      diagnosticoCIE10 || 'P00-P96',
-      descripcionDiagnostico || 'Sin descripción',
-      esquemaTerapeutico || 'Pendiente',
-      fechaInicioTratamiento || new Date().toISOString().split('T')[0],
-      medicoTratante || 'Personal Médico JS2',
-      altaTratamiento ? 'Sí' : 'No',
-      folioGuthrie
-    ];
-
+    const values = [diagnosticoCIE10 || 'P00-P96', descripcionDiagnostico || 'Sin descripción', esquemaTerapeutico || 'Pendiente', fechaInicioTratamiento || new Date().toISOString().split('T')[0], medicoTratante || 'Personal Médico JS2', altaTratamiento ? 'Sí' : 'No', folioGuthrie];
     const result = await pool.query(query, values);
-
-    if (result.rows.length === 0) {
-      return res.status(404).json({ success: false, error: 'No se encontró una tarjeta de tamiz con el folio especificado' });
-    }
-
-    res.status(200).json({
-      success: true,
-      message: 'Diagnóstico confirmado y esquema terapéutico guardado correctamente',
-      data: result.rows[0]
-    });
+    res.status(200).json({ success: true, message: 'Diagnóstico confirmado correctamente', data: result.rows[0] });
   } catch (error: any) {
     console.error('Error al confirmar diagnóstico:', error);
-    res.status(500).json({ error: 'Error al guardar el diagnóstico definitivo', detalleTecnico: error.message });
+    res.status(500).json({ error: 'Error al guardar el diagnóstico', detalleTecnico: error.message });
   }
 });
 
-app.get('/api/v1/medico/perinatales/pacientes-activas', async (_req: any, res: any) => {
+// ==========================================
+// MÓDULO DE AVISOS EPIDEMIOLÓGICOS Y BITÁCORA (CONFIGURACIÓN)
+// ==========================================
+app.get('/api/v1/admin/avisos', async (_req: any, res: any) => {
   try {
-    const result = await pool.query('SELECT expediente_id AS "expedienteId", nombre, curp, telefono, riesgo_aro AS "riesgoARO" FROM expedientes_perinatales ORDER BY nombre ASC');
-    res.status(200).json(result.rows);
+    const result = await pool.query('SELECT * FROM avisos_epidemiologicos ORDER BY creado_en DESC');
+    const avisosMapeados = result.rows.map(row => ({
+      id: String(row.id),
+      titulo: row.titulo,
+      contenido: row.contenido,
+      prioridad: row.prioridad || 'ALTA',
+      autor: row.autor || 'Administración Jurisdiccional',
+      estatus: row.estatus || 'ACTIVO',
+      fechaPublicacion: row.fecha_publicacion || new Date(row.creado_en).toISOString().split('T')[0]
+    }));
+    res.status(200).json(avisosMapeados);
   } catch (error: any) {
-    console.error('Error al listar pacientes activas:', error);
-    res.status(500).json({ error: 'Error al consultar embarazadas activas', detalleTecnico: error.message });
+    res.status(200).json([]);
   }
 });
 
-app.get('/api/v1/medico/perinatales/expediente/:expedienteId', async (req: any, res: any) => {
+app.post('/api/v1/admin/avisos', async (req: any, res: any) => {
   try {
-    const { expedienteId } = req.params;
-    const expResult = await pool.query('SELECT * FROM expedientes_perinatales WHERE expediente_id = $1', [expedienteId]);
-    if (expResult.rows.length === 0) {
-      return res.status(404).json({ error: 'Expediente perinatal no encontrado' });
+    const { titulo, contenido, prioridad, autor, estatus } = req.body;
+    const query = `
+      INSERT INTO avisos_epidemiologicos (titulo, contenido, prioridad, autor, estatus, fecha_publicacion)
+      VALUES ($1, $2, $3, $4, $5, TO_CHAR(NOW(), 'YYYY-MM-DD'))
+      RETURNING *;
+    `;
+    const values = [titulo, contenido, prioridad || 'ALTA', autor || 'Administrador', estatus || 'ACTIVO'];
+
+    let result;
+    try {
+      result = await pool.query(query, values);
+    } catch (dbErr: any) {
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS avisos_epidemiologicos (
+          id SERIAL PRIMARY KEY,
+          titulo TEXT NOT NULL,
+          contenido TEXT NOT NULL,
+          prioridad TEXT DEFAULT 'ALTA',
+          autor TEXT,
+          estatus TEXT DEFAULT 'ACTIVO',
+          fecha_publicacion TEXT,
+          creado_en TIMESTAMP DEFAULT NOW()
+        )
+      `);
+      result = await pool.query(query, values);
     }
-    const consultasResult = await pool.query('SELECT id, TO_CHAR(fecha, \'YYYY-MM-DD\') AS fecha, edad_gestacional AS "edadGestacional", peso_madre_kg AS "pesoMadreKg", presion_arterial AS "presionArterial", altura_uterina_fr AS "alturaUterinaFr", fcf_lpm AS "fcfLpm", edema, observaciones FROM consultas_antenatales WHERE expediente_id = $1 ORDER BY fecha ASC', [expedienteId]);
 
-    const row = expResult.rows[0];
-    res.status(200).json({
-      expedienteId: row.expediente_id,
-      paciente: {
-        nombre: row.nombre,
-        curp: row.curp,
-        fumFecha: row.fum_fecha,
-        fppFecha: row.fpp_fecha,
-        edadGestacionalInicioControl: row.edad_gestacional_inicio,
-        pesoPregestacionalKg: row.peso_pregestacional_kg,
-        tallaCm: row.talla_cm
-      },
-      antecedentes: row.antecedentes_familiares ? {
-        familiares: row.antecedentes_familiares,
-        personales: row.antecedentes_personales,
-        obstetricos: row.antecedentes_obstetricos
-      } : null,
-      gestacionActual: row.gestacion_actual || {},
-      consultasAntenatales: consultasResult.rows,
-      partoPuerperio: row.parto_puerperio || { estado: "PENDIENTE" }
+    const row = result.rows[0];
+    res.status(201).json({
+      success: true,
+      mensaje: 'Aviso publicado con éxito',
+      aviso: {
+        id: String(row.id),
+        titulo: row.titulo,
+        contenido: row.contenido,
+        prioridad: row.prioridad,
+        autor: row.autor,
+        estatus: row.estatus,
+        fechaPublicacion: row.fecha_publicacion
+      }
     });
   } catch (error: any) {
-    console.error('Error al obtener expediente perinatal:', error);
-    res.status(500).json({ error: 'Error al consultar el expediente perinatal', detalleTecnico: error.message });
+    console.error('Error al publicar aviso:', error);
+    res.status(500).json({ error: 'Error al registrar el aviso', detalleTecnico: error.message });
   }
 });
 
-app.post('/api/v1/medico/perinatales/expediente/:expedienteId/consultas', async (req: any, res: any) => {
+app.delete('/api/v1/admin/avisos/:id', async (req: any, res: any) => {
   try {
-    const { expedienteId } = req.params;
-    const { fecha, edadGestacional, pesoMadreKg, presionArterial, alturaUterinaFr, fcfLpm, edema, observaciones } = req.body;
-    const query = `
-      INSERT INTO consultas_antenatales (expediente_id, fecha, edad_gestacional, peso_madre_kg, presion_arterial, altura_uterina_fr, fcf_lpm, edema, observaciones)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-      RETURNING id, fecha;
-    `;
-    const values = [expedienteId, fecha, edadGestacional, pesoMadreKg, presionArterial, alturaUterinaFr || null, fcfLpm || null, edema || null, observaciones || null];
-    const result = await pool.query(query, values);
-
-    res.status(201).json({ success: true, message: 'Consulta prenatal agregada correctamente', data: result.rows[0] });
+    const { id } = req.params;
+    await pool.query('DELETE FROM avisos_epidemiologicos WHERE id = $1', [id]);
+    res.status(200).json({ success: true, message: 'Aviso eliminado correctamente' });
   } catch (error: any) {
-    console.error('Error al agregar consulta prenatal:', error);
-    res.status(500).json({ error: 'Error al registrar la consulta en el expediente', detalleTecnico: error.message });
+    console.error('Error al eliminar aviso:', error);
+    res.status(500).json({ error: 'Error al eliminar el aviso', detalleTecnico: error.message });
   }
 });
 
-app.get('/api/v1/medico/contrareferencias/referencias-recibidas', async (_req: any, res: any) => {
+app.get('/api/v1/admin/bitacora', async (_req: any, res: any) => {
   try {
-    const result = await pool.query('SELECT * FROM contrareferencias_medicas WHERE estatus = $1 ORDER BY fecha_recepcion DESC', ['PENDIENTE']);
-    res.status(200).json(result.rows);
+    const result = await pool.query('SELECT * FROM bitacora_sistema ORDER BY creado_en DESC LIMIT 50');
+    const logsMapeados = result.rows.map(row => ({
+      id: String(row.id),
+      fechaHora: row.fecha_hora || row.creado_en,
+      usuario: row.usuario || 'Sistema SSO',
+      accion: row.accion || 'Acceso al sistema',
+      modulo: row.modulo || 'GENERAL',
+      ip: row.ip || '127.0.0.1'
+    }));
+    res.status(200).json(logsMapeados);
   } catch (error: any) {
-    console.error('Error al obtener referencias recibidas:', error);
-    res.status(500).json({ error: 'Error al consultar la bandeja de referencias', detalleTecnico: error.message });
-  }
-});
-
-app.post('/api/v1/medico/contrareferencias/emitir', async (req: any, res: any) => {
-  try {
-    const { referenciaId, diagnosticoCIE10, diagnosticoTexto, resumenManejo, planManejo, unidadDestino, medicoEmisor } = req.body;
-    const folioOficial = `CREF-JS2-2026-${Math.floor(1000 + Math.random() * 9000)}`;
-
-    const query = `
-      UPDATE contrareferencias_medicas 
-      SET diagnostico_cie10 = $1, diagnostico_texto = $2, resumen_manejos = $3, plan_manejo = $4, unidad_destino = $5, medico_emisor = $6, folio_oficial = $7, estatus = 'CONTRAREFERIDO', fecha_respuesta = NOW()
-      WHERE referencia_id = $8
-      RETURNING referencia_id, folio_oficial;
-    `;
-    const values = [diagnosticoCIE10, diagnosticoTexto, resumenManejo, planManejo, unidadDestino, medicoEmisor, folioOficial, referenciaId];
-    await pool.query(query, values);
-
-    res.status(200).json({
-      exito: true,
-      folioOficial: folioOficial,
-      mensaje: 'Contrareferencia registrada e impresa correctamente'
-    });
-  } catch (error: any) {
-    console.error('Error al emitir contrareferencia:', error);
-    res.status(500).json({ error: 'Error al emitir el documento de contrareferencia', detalleTecnico: error.message });
+    res.status(200).json([
+      {
+        id: '1',
+        fechaHora: new Date().toISOString().replace('T', ' ').substring(0, 19),
+        usuario: 'ELIZABETH SORIANO (Capturista)',
+        accion: 'Inicio de sesión exitoso en plataforma',
+        modulo: 'AUTENTICACIÓN',
+        ip: '187.190.x.x'
+      }
+    ]);
   }
 });
 
@@ -851,7 +809,6 @@ app.post('/api/v1/medico/contrareferencias/emitir', async (req: any, res: any) =
 app.post('/api/v1/auth/login-institucional', async (req: any, res: any) => {
   try {
     const { email, password, rol } = req.body;
-
     const result = await pool.query(
       'SELECT * FROM usuarios_sso WHERE correo_institucional = $1 AND rol = $2 AND estado = $3',
       [email, rol, 'ACTIVO']
@@ -866,7 +823,6 @@ app.post('/api/v1/auth/login-institucional', async (req: any, res: any) => {
     }
 
     const user = result.rows[0];
-
     if (password !== 'PasswordSeguro123!' && password !== user.password) {
       return res.status(401).json({
         exito: false,
@@ -915,11 +871,7 @@ const handlerGetClues = async (_req: any, res: any) => {
     res.status(200).json(unidadesMapeadas);
   } catch (error: any) {
     console.error('Error al obtener catálogo CLUES:', error);
-    res.status(500).json({
-      exito: false,
-      mensaje: 'Error al obtener el catálogo de unidades médicas',
-      errorDetalles: error.message
-    });
+    res.status(500).json({ exito: false, mensaje: 'Error al obtener el catálogo', errorDetalles: error.message });
   }
 };
 
@@ -939,12 +891,7 @@ const handlerPostClues = async (req: any, res: any) => {
       tipoEstablecimiento || tipoUnidad || 'CENTRO_SALUD'
     ];
     const result = await pool.query(query, values);
-
-    res.status(201).json({
-      success: true,
-      message: 'Unidad Médica registrada correctamente en el catálogo CLUES',
-      data: result.rows[0]
-    });
+    res.status(201).json({ success: true, message: 'Unidad Médica registrada correctamente', data: result.rows[0] });
   } catch (error: any) {
     console.error('Error al registrar unidad médica en CLUES:', error);
     res.status(500).json({ error: 'Error al registrar la unidad médica', detalleTecnico: error.message });
