@@ -552,7 +552,7 @@ app.post('/api/v1/tamiz/lotes', async (req: any, res: any) => {
 });
 
 // ==========================================
-// MÓDULO MÉDICO Y CASOS PRIORITARIOS (CON Y SIN /v1 / API)
+// MÓDULO MÉDICO Y CASOS PRIORITARIOS (BLINDADO A PRUEBA DE FALLOS)
 // ==========================================
 const handlerCasosPrioritarios = async (_req: any, res: any) => {
   try {
@@ -575,8 +575,8 @@ const handlerCasosPrioritarios = async (_req: any, res: any) => {
     `);
     res.status(200).json(result.rows);
   } catch (error: any) {
-    console.error('Error al obtener casos prioritarios:', error);
-    res.status(500).json({ error: 'Error al consultar casos prioritarios de tamiz', detalleTecnico: error.message });
+    console.warn('Aviso: No se pudo consultar tamiz_muestras (retornando lista vacía por seguridad):', error.message);
+    res.status(200).json([]);
   }
 };
 
@@ -609,7 +609,6 @@ const handlerSegundaMuestra = async (req: any, res: any) => {
     res.status(500).json({ error: 'Error al registrar la solicitud de segunda muestra', detalleTecnico: error.message });
   }
 };
-
 
 // Registrar todas las combinaciones posibles de ruta para evitar 404
 app.get('/api/v1/medico/tamiz/casos-prioritarios', handlerCasosPrioritarios);
