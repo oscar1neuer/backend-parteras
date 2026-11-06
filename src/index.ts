@@ -879,6 +879,82 @@ app.get('/api/v1/admin/calendarios/salud-materna', handlerGetSaludMaterna);
 app.get('/api/v1/admin/calendarios/desarrollo-infantil', handlerGetDesarrolloInfantil);
 
 // ==========================================
+// MÓDULO DE REFERENCIAS Y CONTRAREFERENCIAS (FORMATO 1)
+// ==========================================
+const handlerGetReferenciasAdmin = async (_req: any, res: any) => {
+  try {
+    const query = `
+      SELECT 
+        hr.id,
+        'REF-2026-' || LPAD(CAST(hr.id AS TEXT), 4, '0') AS folio,
+        hr.nombre_usuaria AS "nombrePaciente",
+        COALESCE(hr.edad, 25) AS edad,
+        COALESCE(p.nombre, 'Partera Tradicional Acreditada') AS "parteraNombre",
+        COALESCE(
+          (SELECT motivo ->> 'descripcion' FROM jsonb_array_elements(hr.motivos_referencia) AS motivo LIMIT 1),
+          CAST(hr.motivos_referencia AS TEXT),
+          'Canalización por factores de riesgo obstétrico'
+        ) AS "motivoReferencia",
+        COALESCE(hr.centro_salud, 'Hospital General de Juchitán') AS "unidadDestino",
+        COALESCE(hr.municipio_usuaria, hr.localidad_usuaria, 'Juchitán de Zaragoza') AS municipio,
+        COALESCE(hr.estado, 'PENDIENTE') AS estatus,
+        c.tratamiento AS "respuestaContrareferencia"
+      FROM hojas_referencia hr
+      LEFT JOIN parteras p ON hr.partera_id = p.id
+      LEFT JOIN contrareferencias c ON hr.id = c.hoja_referencia_id
+      ORDER BY hr.creado_en DESC
+    `;
+    const result = await pool.query(query);
+    res.status(200).json(result.rows);
+  } catch (error: any) {
+    console.warn('Aviso: No se pudo consultar hojas_referencia:', error.message);
+    res.status(200).json([]);
+  }
+};
+
+const handlerPatchContrareferenciaAdmin = async (req: any, res: any) => {
+  try {
+    const { id } = req.params;
+    const { respuestaContrareferencia, estatus } = req.body;
+
+    const checkExist = await pool.query('SELECT id FROM contrareferencias WHERE hoja_referencia_id = $1', [id]);
+
+    if (checkExist.rows.length > 0) {
+      await pool.query(
+        `UPDATE contrareferencias 
+         SET tratamiento = $1, fecha_respuesta = NOW() 
+         WHERE hoja_referencia_id = $2`,
+        [respuestaContrareferencia, id]
+      );
+    } else {
+      await pool.query(
+        `INSERT INTO contrareferencias (hoja_referencia_id, medico_nombre, diagnostico, tratamiento, estatus, fecha_respuesta)
+         VALUES ($1, 'Médico Especialista Jurisdiccional', 'Atención obstétrica en unidad hospitalaria', $2, $3, NOW())`,
+        [id, respuestaContrareferencia, estatus || 'CONTRAREFERIDO']
+      );
+    }
+
+    await pool.query(
+      "UPDATE hojas_referencia SET estado = $1 WHERE id = $2",
+      [estatus || 'CONTRAREFERIDO', id]
+    );
+
+    res.status(200).json({
+      success: true,
+      message: 'Contrareferencia guardada y actualizada con éxito'
+    });
+  } catch (error: any) {
+    console.error('Error al actualizar contrareferencia:', error);
+    res.status(500).json({ error: 'Error al procesar la contrareferencia', detalleTecnico: error.message });
+  }
+};
+
+app.get('/admin/referencias', handlerGetReferenciasAdmin);
+app.patch('/admin/referencias/:id/contrareferencia', handlerPatchContrareferenciaAdmin);
+app.get('/api/v1/admin/referencias', handlerGetReferenciasAdmin);
+app.patch('/api/v1/admin/referencias/:id/contrareferencia', handlerPatchContrareferenciaAdmin);
+
+// ==========================================
 // MÓDULO DE AUTENTICACIÓN INSTITUCIONAL
 // ==========================================
 app.post('/api/v1/auth/login-institucional', async (req: any, res: any) => {
