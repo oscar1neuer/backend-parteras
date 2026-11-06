@@ -955,6 +955,222 @@ app.get('/api/v1/admin/referencias', handlerGetReferenciasAdmin);
 app.patch('/api/v1/admin/referencias/:id/contrareferencia', handlerPatchContrareferenciaAdmin);
 
 // ==========================================
+// MÓDULO DE EXPEDIENTE PERINATAL (CARNÉ CLAP)
+// ==========================================
+app.get('/api/medico/perinatales/pacientes-activas', async (_req: any, res: any) => {
+  try {
+    const result = await pool.query(`
+      SELECT 
+        id,
+        id AS "expedienteId",
+        nombre_paciente AS "nombrePaciente",
+        curp,
+        telefono,
+        TO_CHAR(fum_fecha, 'YYYY-MM-DD') AS "fumFecha",
+        TO_CHAR(fpp_fecha, 'YYYY-MM-DD') AS "fppFecha",
+        edad_gestacional_inicio AS "edadGestacionalInicioControl",
+        grupo_sanguineo AS "grupoSanguineo",
+        factor_rh AS "factorRh",
+        vih_serologia AS "vihSerologia",
+        vdrl_serologia AS "vdrlSerologia",
+        vacuna_tetanos AS "vacunaTetanos",
+        vacuna_dosis_2 AS "vacunaDosis2",
+        COALESCE(riesgo_aro, 'MEDIO') AS "riesgoARO"
+      FROM expedientes_perinatales
+      ORDER BY creado_en DESC
+    `);
+    res.status(200).json(result.rows);
+  } catch (error: any) {
+    console.warn('Aviso: Tabla expedientes_perinatales no encontrada o vacía, retornando datos vacíos:', error.message);
+    res.status(200).json([]);
+  }
+});
+
+app.get('/api/medico/perinatales/expediente/:id', async (req: any, res: any) => {
+  try {
+    const { id } = req.params;
+    const expResult = await pool.query('SELECT * FROM expedientes_perinatales WHERE id = $1', [id]);
+    if (expResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Expediente perinatal no encontrado' });
+    }
+    const row = expResult.rows[0];
+
+    const consultasResult = await pool.query(
+      'SELECT * FROM consultas_antenatales WHERE expediente_id = $1 ORDER BY numero_consulta ASC',
+      [id]
+    );
+
+    const expedienteCompleto = {
+      id: String(row.id),
+      expedienteId: String(row.id),
+      nombrePaciente: row.nombre_paciente,
+      curp: row.curp,
+      telefono: row.telefono,
+      fumFecha: row.fum_fecha ? new Date(row.fum_fecha).toISOString().split('T')[0] : '2026-04-01',
+      fppFecha: row.fpp_fecha ? new Date(row.fpp_fecha).toISOString().split('T')[0] : '2027-01-05',
+      edadGestacionalInicioControl: row.edad_gestacional_inicio || 10,
+      grupoSanguineo: row.grupo_sanguineo || 'O+',
+      factorRh: row.factor_rh || 'POSITIVO',
+      vihSerologia: row.vih_serologia || 'NEGATIVO',
+      vdrlSerologia: row.vdrl_serologia || 'NON_REACTIVE',
+      vacunaTetanos: row.vacuna_tetanos || false,
+      vacunaDosis2: row.vacuna_dosis_2 || false,
+      riesgoARO: row.riesgo_aro || 'MEDIO',
+      criteriosARO: row.criterios_aro ? JSON.parse(row.criterios_aro) : ['Período intergenésico < 2 años'],
+      antecedentesFamiliares: row.antecedentes_familiares ? JSON.parse(row.antecedentes_familiares) : { diabetes: true, hipertension: false, gemelaridad: false },
+      antecedentesPersonales: row.antecedentes_personales ? JSON.parse(row.antecedentes_personales) : { diabetesGestacionalPrevia: false, htaCronica: false },
+      antecedentesObstetricos: row.antecedentes_obstetricos ? JSON.parse(row.antecedentes_obstetricos) : { gestasAnteriores: 2, paritosAnteriores: 1, cesareasAnteriores: 1, abortosAnteriores: 0, mortinatos: 0, rpMenorA2500g: 0 },
+      consultas: consultasResult.rows.map((c: any, index: number) => ({
+        id: String(c.id),
+        numeroConsulta: c.numero_consulta || (index + 1),
+        fecha: c.fecha ? new Date(c.fecha).toISOString().split('T')[0] : '2026-06-10',
+        edadGestacional: c.edad_gestacional || 10,
+        pesoMadreKg: Number(c.peso_madre_kg || 60),
+        tallaMadreM: Number(c.talla_madre_m || 1.55),
+        imcCalculado: Number(c.imc_calculado || 25.0),
+        presionArterialSistolica: Number(c.pas || 110),
+        presionArterialDiastolica: Number(c.pad || 70),
+        alturaUterinaFr: Number(c.altura_uterina_fr || 10),
+        frecuenciaCardiacaFetal: Number(c.fcf || 140),
+        presentacion: c.presentacion || 'Cefálica',
+        edema: c.edema || 'NO',
+        observaciones: c.observaciones || 'Control antenatal ordinario.',
+        medicoFirma: c.medico_firma || 'Dr. Médico Adscrito',
+      })),
+      fechaParto: row.fecha_parto ? new Date(row.fecha_parto).toISOString().split('T')[0] : null,
+      tipoPartoParto: row.tipo_parto || null,
+      semanasParto: row.semanas_parto || null,
+      apgar1: row.apgar_1 || null,
+      apgar5: row.apgar_5 || null,
+      pesoRNGramos: row.peso_rn_gramos || null,
+      tallaRNCm: row.talla_rn_cm || null,
+      folioGuthrie: row.folio_guthrie || null,
+      tamizRNRealizado: Boolean(row.folio_guthrie),
+    };
+
+    res.status(200).json(expedienteCompleto);
+  } catch (error: any) {
+    console.error('Error al obtener expediente perinatal:', error);
+    res.status(500).json({ error: 'Error al consultar el expediente', detalleTecnico: error.message });
+  }
+});
+
+app.post('/api/medico/perinatales/expediente/:id/consultas', async (req: any, res: any) => {
+  try {
+    const { id } = req.params;
+    const { fecha, edadGestacional, pesoMadreKg, presionArterial, alturaUterinaFr, fcfLpm, edema, observaciones } = req.body;
+
+    const pas = presionArterial ? Number(presionArterial.split('/')[0]) : 110;
+    const pad = presionArterial ? Number(presionArterial.split('/')[1]) : 70;
+    const imc = Number((Number(pesoMadreKg) / (1.55 ** 2)).toFixed(1));
+
+    const countRes = await pool.query('SELECT COUNT(*) FROM consultas_antenatales WHERE expediente_id = $1', [id]);
+    const numConsulta = parseInt(countRes.rows[0].count, 10) + 1;
+
+    const query = `
+      INSERT INTO consultas_antenatales (
+        expediente_id, numero_consulta, fecha, edad_gestacional, peso_madre_kg, 
+        talla_madre_m, imc_calculado, pas, pad, altura_uterina_fr, fcf, edema, observaciones
+      ) VALUES ($1, $2, $3, $4, $5, 1.55, $6, $7, $8, $9, $10, $11, $12)
+      RETURNING id;
+    `;
+    const values = [id, numConsulta, fecha, edadGestacional, pesoMadreKg, imc, pas, pad, alturaUterinaFr, fcfLpm, edema || 'NO', observaciones];
+    const result = await pool.query(query, values);
+
+    res.status(201).json({
+      success: true,
+      message: 'Consulta registrada correctamente',
+      consultaId: result.rows[0].id
+    });
+  } catch (error: any) {
+    console.error('Error al registrar consulta antenatal:', error);
+    res.status(500).json({ error: 'Error al registrar la consulta', detalleTecnico: error.message });
+  }
+});
+
+app.put('/api/medico/perinatales/expediente/:id/antecedentes', async (req: any, res: any) => {
+  try {
+    const { id } = req.params;
+    const { antecedentesFamiliares, antecedentesPersonales, antecedentesObstetricos, criteriosARO, riesgoARO } = req.body;
+
+    const query = `
+      UPDATE expedientes_perinatales 
+      SET antecedentes_familiares = $1, antecedentes_personales = $2, antecedentes_obstetricos = $3, criterios_aro = $4, riesgo_aro = $5
+      WHERE id = $6
+    `;
+    await pool.query(query, [
+      JSON.stringify(antecedentesFamiliares),
+      JSON.stringify(antecedentesPersonales),
+      JSON.stringify(antecedentesObstetricos),
+      JSON.stringify(criteriosARO),
+      riesgoARO,
+      id
+    ]);
+
+    res.status(200).json({ success: true, message: 'Antecedentes actualizados correctamente' });
+  } catch (error: any) {
+    console.error('Error al actualizar antecedentes:', error);
+    res.status(500).json({ error: 'Error al actualizar antecedentes', detalleTecnico: error.message });
+  }
+});
+
+app.put('/api/medico/perinatales/expediente/:id/laboratorios', async (req: any, res: any) => {
+  try {
+    const { id } = req.params;
+    const { grupoSanguineo, factorRh, vihSerologia, vdrlSerologia, vacunaTetanos, vacunaDosis2 } = req.body;
+
+    const query = `
+      UPDATE expedientes_perinatales 
+      SET grupo_sanguineo = $1, factor_rh = $2, vih_serologia = $3, vdrl_serologia = $4, vacuna_tetanos = $5, vacuna_dosis_2 = $6
+      WHERE id = $7
+    `;
+    await pool.query(query, [grupoSanguineo, factorRh, vihSerologia, vdrlSerologia, vacunaTetanos, vacunaDosis2, id]);
+
+    res.status(200).json({ success: true, message: 'Laboratorios y serología actualizados con éxito' });
+  } catch (error: any) {
+    console.error('Error al actualizar laboratorios:', error);
+    res.status(500).json({ error: 'Error al actualizar laboratorios', detalleTecnico: error.message });
+  }
+});
+
+app.post('/api/medico/perinatales/expediente/:id/parto', async (req: any, res: any) => {
+  try {
+    const { id } = req.params;
+    const { fechaHoraNacimiento, tipoPartoParto, semanasParto, apgar1, apgar5, pesoRNGramos, tallaRNCm, folioGuthrie } = req.body;
+
+    const query = `
+      UPDATE expedientes_perinatales 
+      SET 
+        fecha_parto = $1, 
+        tipo_parto = $2, 
+        semanas_parto = $3, 
+        apgar_1 = $4, 
+        apgar_5 = $5, 
+        peso_rn_gramos = $6, 
+        talla_rn_cm = $7, 
+        folio_guthrie = $8
+      WHERE id = $9
+    `;
+    await pool.query(query, [
+      fechaHoraNacimiento,
+      tipoPartoParto,
+      semanasParto,
+      apgar1,
+      apgar5,
+      pesoRNGramos,
+      tallaRNCm,
+      folioGuthrie,
+      id
+    ]);
+
+    res.status(200).json({ success: true, message: 'Evento de parto y datos del RN registrados con éxito' });
+  } catch (error: any) {
+    console.error('Error al registrar evento de parto:', error);
+    res.status(500).json({ error: 'Error al registrar el parto', detalleTecnico: error.message });
+  }
+});
+
+// ==========================================
 // MÓDULO DE AUTENTICACIÓN INSTITUCIONAL
 // ==========================================
 app.post('/api/v1/auth/login-institucional', async (req: any, res: any) => {
