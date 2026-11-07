@@ -958,7 +958,7 @@ app.get('/api/v1/admin/referencias', handlerGetReferenciasAdmin);
 app.patch('/api/v1/admin/referencias/:id/contrareferencia', handlerPatchContrareferenciaAdmin);
 
 // ==========================================
-// MÓDULO DE EXPEDIENTE PERINATAL (CARNÉ CLAP) - CON RUTAS DUALES SOPORTADAS
+// MÓDULO DE EXPEDIENTE PERINATAL (CARNÉ CLAP) - SOPORTE DUAL
 // ==========================================
 const handlerGetPacientesActivas = async (_req: any, res: any) => {
   try {
@@ -1173,7 +1173,7 @@ const handlerPostParto = async (req: any, res: any) => {
   }
 };
 
-// Mapeador de rutas perinatales (Soporta /api/..., /api/v1/... y sin prefijo)
+// Registro de rutas perinatales con soporte dual
 const registrarRutasPerinatales = (prefix: string) => {
   app.get(`${prefix}/medico/perinatales/pacientes-activas`, handlerGetPacientesActivas);
   app.get(`${prefix}/medico/perinatales/expediente/:id`, handlerGetExpedienteId);
@@ -1186,6 +1186,80 @@ const registrarRutasPerinatales = (prefix: string) => {
 registrarRutasPerinatales('/api');
 registrarRutasPerinatales('/api/v1');
 registrarRutasPerinatales('');
+
+// ==========================================
+// MÓDULO DE CONTRAREFERENCIAS MÉDICAS COMUNITARIAS
+// ==========================================
+const handlerGetPendientesContraref = async (_req: any, res: any) => {
+  try {
+    const query = `
+      SELECT 
+        hr.id,
+        'REF-COM-2026-' || LPAD(CAST(hr.id AS TEXT), 3, '0') AS "folioReferencia",
+        hr.nombre_usuaria AS "nombrePaciente",
+        COALESCE(hr.edad, 25) AS "edadPaciente",
+        COALESCE(hr.localidad_usuaria, 'Comunidad') AS "comunidadOrigen",
+        COALESCE(hr.municipio_usuaria, 'Juchitán de Zaragoza') AS municipio,
+        COALESCE(p.nombre, 'Partera Tradicional Acreditada') AS "nombrePartera",
+        'ALTO' AS "nivelRiesgo",
+        COALESCE(
+          (SELECT motivo ->> 'descripcion' FROM jsonb_array_elements(hr.motivos_referencia) AS motivo LIMIT 1),
+          'Canalización por factores de riesgo obstétrico'
+        ) AS "motivoReferencia",
+        CASE 
+          WHEN hr.estado = 'CONTRAREFERIDO' THEN 'ATENDIDA'
+          ELSE 'PENDIENTE_ATENCION'
+        END AS "estatusContraRef",
+        TO_CHAR(hr.fecha_referencia, 'YYYY-MM-DD') AS "fechaReferencia",
+        c.diagnostico AS "diagnosticoMedico",
+        c.tratamiento AS "planManejo",
+        c.id AS "folioContraRef"
+      FROM hojas_referencia hr
+      LEFT JOIN parteras p ON hr.partera_id = p.id
+      LEFT JOIN contrareferencias c ON hr.id = c.hoja_referencia_id
+      ORDER BY hr.fecha_creacion DESC
+    `;
+    const result = await pool.query(query);
+    res.status(200).json(result.rows);
+  } catch (error: any) {
+    console.warn('Aviso: No se pudieron consultar las contrareferencias:', error.message);
+    res.status(200).json([]);
+  }
+};
+
+const handlerEmitirContraref = async (req: any, res: any) => {
+  try {
+    const { referenciaId, diagnosticoImpresion, planManejo, medicoFirma, conductaMedica } = req.body;
+
+    const insertQuery = `
+      INSERT INTO contrareferencias (
+        hoja_referencia_id, medico_nombre, diagnostico, tratamiento, conducta_medica, estatus, fecha_respuesta
+      ) VALUES ($1, $2, $3, $4, $5, 'ATENDIDA', NOW())
+      RETURNING id;
+    `;
+    const values = [referenciaId, medicoFirma, diagnosticoImpresion, planManejo, conductaMedica];
+    await pool.query(insertQuery, values);
+
+    await pool.query("UPDATE hojas_referencia SET estado = 'CONTRAREFERIDO' WHERE id = $1", [referenciaId]);
+
+    res.status(201).json({
+      success: true,
+      message: 'Contrareferencia emitida y registrada con éxito'
+    });
+  } catch (error: any) {
+    console.error('Error al emitir contrareferencia:', error);
+    res.status(500).json({ error: 'Error al registrar la contrareferencia', detalleTecnico: error.message });
+  }
+};
+
+const registrarRutasContraref = (prefix: string) => {
+  app.get(`${prefix}/medico/contrareferencias/pendientes`, handlerGetPendientesContraref);
+  app.post(`${prefix}/medico/contrareferencias/emitir`, handlerEmitirContraref);
+};
+
+registrarRutasContraref('/api');
+registrarRutasContraref('/api/v1');
+registrarRutasContraref('');
 
 // ==========================================
 // MÓDULO DE AUTENTICACIÓN INSTITUCIONAL
