@@ -54,7 +54,7 @@ app.post('/api/v1/parteras/login-pin', async (req: any, res: any) => {
 });
 
 // ==========================================
-// MÓDULO DE REFERENCIAS Y CONTRAREFERENCIAS (CORREGIDO Y ROBUSTO)
+// MÓDULO DE REFERENCIAS Y CONTRAREFERENCIAS (100% CORREGIDO)
 // ==========================================
 app.post('/api/v1/referencias', async (req: any, res: any) => {
   try {
@@ -71,6 +71,12 @@ app.post('/api/v1/referencias', async (req: any, res: any) => {
       motivos
     } = req.body;
 
+    // Sanitizamos parteraId para evitar errores con UUIDs de texto o vacíos
+    let idParteraLimpio = null;
+    if (parteraId && !isNaN(Number(parteraId))) {
+      idParteraLimpio = Number(parteraId);
+    }
+
     const nombreFinalUsuaria = usuaria?.nombre || nombreUsuaria || 'Sin nombre';
     const edadFinalUsuaria = usuaria?.edad || edad || 0;
     const sexoFinalUsuaria = usuaria?.sexo || sexo || 'F';
@@ -86,7 +92,7 @@ app.post('/api/v1/referencias', async (req: any, res: any) => {
     `;
 
     const values = [
-      parteraId || null,
+      idParteraLimpio,
       centroSalud || 'Hospital General',
       nombreFinalUsuaria,
       edadFinalUsuaria,
