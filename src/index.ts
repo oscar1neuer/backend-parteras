@@ -6,19 +6,16 @@ const cors = require('cors');
 const app = express();
 
 // ==========================================
-// CONFIGURACIÓN GLOBAL DE CORS (SOLUCIÓN DEFINITIVA)
+// CONFIGURACIÓN DE CORS GLOBAL Y PREFLIGHT
 // ==========================================
-app.use((req, res, next) => {
-  res.header('Access-Control-Allow-Origin', '*');
-  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-  if (req.method === 'OPTIONS') {
-    return res.sendStatus(200);
-  }
-  next();
-});
+app.use(cors({
+  origin: '*',
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  credentials: true
+}));
 
-app.use(cors());
+app.options('*', cors());
 app.use(express.json());
 
 const JWT_SECRET = (globalThis as any).process?.env?.JWT_SECRET || 'secreto_jurisdiccion_2';
@@ -66,7 +63,7 @@ app.post('/api/v1/parteras/login-pin', async (req: any, res: any) => {
 });
 
 // ==========================================
-// MÓDULO DE REFERENCIAS Y CONTRAREFERENCIAS (100% CORREGIDO)
+// MÓDULO DE REFERENCIAS Y CONTRAREFERENCIAS
 // ==========================================
 app.post('/api/v1/referencias', async (req: any, res: any) => {
   try {
@@ -83,7 +80,7 @@ app.post('/api/v1/referencias', async (req: any, res: any) => {
       motivos
     } = req.body;
 
-    // Sanitizamos parteraId para evitar errores con UUIDs de texto o vacíos
+    // Sanitizamos parteraId para evitar errores si llega un string tipo UUID por defecto
     let idParteraLimpio = null;
     if (parteraId && !isNaN(Number(parteraId))) {
       idParteraLimpio = Number(parteraId);
@@ -150,7 +147,7 @@ app.post('/api/v1/referencias/:id/contrareferencia', async (req: any, res: any) 
     const insertQuery = `
       INSERT INTO contrareferencias (hoja_referencia_id, medico_nombre, diagnostico, tratamiento, observaciones_partera)
       VALUES ($1, $2, $3, $4, $5)
-      RETURNING id, fecha_respuesta;
+      RETURNING id;
     `;
     const insertValues = [id, medicoNombre, diagnostico, tratamiento, observacionesPartera || null];
     const contraResult = await pool.query(insertQuery, insertValues);
@@ -644,10 +641,8 @@ const handlerAgendarRetoma = async (req: any, res: any) => {
 
 app.get('/api/v1/tamiz/alertas-recall', handlerAlertasRecall);
 app.get('/api/tamiz/alertas-recall', handlerAlertasRecall);
-
 app.post('/api/v1/tamiz/notificar-recall', handlerNotificarRecall);
 app.post('/api/tamiz/notificar-recall', handlerNotificarRecall);
-
 app.post('/api/v1/tamiz/agendar-retoma', handlerAgendarRetoma);
 app.post('/api/tamiz/agendar-retoma', handlerAgendarRetoma);
 
@@ -704,7 +699,6 @@ const handlerSegundaMuestra = async (req: any, res: any) => {
 app.get('/api/v1/medico/tamiz/casos-prioritarios', handlerCasosPrioritarios);
 app.get('/api/medico/tamiz/casos-prioritarios', handlerCasosPrioritarios);
 app.get('/medico/tamiz/casos-prioritarios', handlerCasosPrioritarios);
-
 app.post('/api/v1/medico/tamiz/solicitar-segunda-muestra', handlerSegundaMuestra);
 app.post('/api/medico/tamiz/solicitar-segunda-muestra', handlerSegundaMuestra);
 app.post('/medico/tamiz/solicitar-segunda-muestra', handlerSegundaMuestra);
@@ -840,7 +834,6 @@ app.get('/admin/avisos', handlerGetAvisos);
 app.post('/admin/avisos', handlerPostAvisos);
 app.delete('/admin/avisos/:id', handlerDeleteAvisos);
 app.get('/admin/bitacora', handlerGetBitacora);
-
 app.get('/api/v1/admin/avisos', handlerGetAvisos);
 app.post('/api/v1/admin/avisos', handlerPostAvisos);
 app.delete('/api/v1/admin/avisos/:id', handlerDeleteAvisos);
@@ -988,7 +981,7 @@ app.get('/api/v1/admin/referencias', handlerGetReferenciasAdmin);
 app.patch('/api/v1/admin/referencias/:id/contrareferencia', handlerPatchContrareferenciaAdmin);
 
 // ==========================================
-// MÓDULO DE EXPEDIENTE PERINATAL (CARNÉ CLAP) - SOPORTE DUAL
+// MÓDULO DE EXPEDIENTE PERINATAL (CARNÉ CLAP)
 // ==========================================
 const handlerGetPacientesActivas = async (_req: any, res: any) => {
   try {
@@ -1014,7 +1007,7 @@ const handlerGetPacientesActivas = async (_req: any, res: any) => {
     `);
     res.status(200).json(result.rows);
   } catch (error: any) {
-    console.warn('Aviso: Tabla expedientes_perinatales no encontrada o vacía, retornando datos vacíos:', error.message);
+    console.warn('Aviso: Tabla expedientes_perinatales no encontrada o vacía:', error.message);
     res.status(200).json([]);
   }
 };
@@ -1203,7 +1196,6 @@ const handlerPostParto = async (req: any, res: any) => {
   }
 };
 
-// Registro de rutas perinatales con soporte dual
 const registrarRutasPerinatales = (prefix: string) => {
   app.get(`${prefix}/medico/perinatales/pacientes-activas`, handlerGetPacientesActivas);
   app.get(`${prefix}/medico/perinatales/expediente/:id`, handlerGetExpedienteId);
@@ -1240,7 +1232,7 @@ const handlerGetPendientesContraref = async (_req: any, res: any) => {
           WHEN hr.estado = 'CONTRAREFERIDO' THEN 'ATENDIDA'
           ELSE 'PENDIENTE_ATENCION'
         END AS "estatusContraRef",
-        TO_CHAR(hr.id, '9999') AS "fechaReferencia",
+        TO_CHAR(NOW(), 'YYYY-MM-DD') AS "fechaReferencia",
         c.diagnostico AS "diagnosticoMedico",
         c.tratamiento AS "planManejo",
         c.id AS "folioContraRef"
