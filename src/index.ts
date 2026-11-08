@@ -35,7 +35,6 @@ app.post('/api/v1/parteras/login-pin', async (req: any, res: any) => {
     const partera = result.rows[0];
     const token = jwt.sign({ id: partera.id, rol: 'PARTERA_TRADICIONAL' }, JWT_SECRET, { expiresIn: '12h' });
 
-    // Armamos el nombre completo garantizando compatibilidad total con el frontend
     const nombreReal = partera.nombre_completo ||
       `${partera.nombre || ''} ${partera.apellido_paterno || ''} ${partera.apellido_materno || ''}`.trim() ||
       'Partera Tradicional';
@@ -71,22 +70,21 @@ app.post('/api/v1/parteras/login-pin', async (req: any, res: any) => {
 // ==========================================
 app.post('/api/v1/referencias', async (req: any, res: any) => {
   try {
-    const { parteraId, centroSalud, usuaria, motivosReferencia, fechaRegistro, nombreUsuaria, edad, sexo, fecha, localidad, municipio, nombrePartera, localidadPartera, motivos, contrareferencia } = req.body;
+    const { parteraId, centroSalud, usuaria, motivosReferencia, nombreUsuaria, edad, sexo, localidad, municipio, motivos, contrareferencia } = req.body;
 
-    // Soporte dual para formato plano (del nuevo formulario) o estructurado
     const finalNombreUsuaria = nombreUsuaria || usuaria?.nombre;
     const finalEdad = edad !== undefined ? edad : usuaria?.edad;
     const finalSexo = sexo || usuaria?.sexo || 'F';
-    const finalFecha = fecha || fechaRegistro || new Date();
     const finalLocalidad = localidad || usuaria?.localidad;
     const finalMunicipio = municipio || usuaria?.municipio;
     const finalMotivos = motivos || motivosReferencia;
 
+    // Consulta corregida sin referencias a columnas de fecha inexistentes
     const query = `
       INSERT INTO hojas_referencia (
         partera_id, centro_salud, nombre_usuaria, edad, sexo, 
-        fecha, localidad_usuaria, municipio_usuaria, motivos_referencia, estado
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, 'PENDIENTE')
+        localidad_usuaria, municipio_usuaria, motivos_referencia, estado
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, 'PENDIENTE')
       RETURNING id, estado, creado_en;
     `;
 
@@ -96,7 +94,6 @@ app.post('/api/v1/referencias', async (req: any, res: any) => {
       finalNombreUsuaria,
       finalEdad,
       finalSexo,
-      finalFecha,
       finalLocalidad,
       finalMunicipio,
       JSON.stringify(finalMotivos)
@@ -104,7 +101,6 @@ app.post('/api/v1/referencias', async (req: any, res: any) => {
 
     const result = await pool.query(query, values);
 
-    // Si viene con contrarreferencia inicial
     if (contrareferencia && contrareferencia.activa) {
       await pool.query(
         `INSERT INTO contrareferencias (hoja_referencia_id, medico_nombre, diagnostico, tratamiento, observaciones_partera, estatus, fecha_respuesta)
@@ -1213,7 +1209,6 @@ const handlerPostParto = async (req: any, res: any) => {
   }
 };
 
-// Registro de rutas perinatales con soporte dual
 const registrarRutasPerinatales = (prefix: string) => {
   app.get(`${prefix}/medico/perinatales/pacientes-activas`, handlerGetPacientesActivas);
   app.get(`${prefix}/medico/perinatales/expediente/:id`, handlerGetExpedienteId);
@@ -1250,14 +1245,14 @@ const handlerGetPendientesContraref = async (_req: any, res: any) => {
           WHEN hr.estado = 'CONTRAREFERIDO' THEN 'ATENDIDA'
           ELSE 'PENDIENTE_ATENCION'
         END AS "estatusContraRef",
-        TO_CHAR(hr.fecha_referencia, 'YYYY-MM-DD') AS "fechaReferencia",
+        TO_CHAR(hr.creado_en, 'YYYY-MM-DD') AS "fechaReferencia",
         c.diagnostico AS "diagnosticoMedico",
         c.tratamiento AS "planManejo",
         c.id AS "folioContraRef"
       FROM hojas_referencia hr
       LEFT JOIN parteras p ON hr.partera_id = p.id
       LEFT JOIN contrareferencias c ON hr.id = c.hoja_referencia_id
-      ORDER BY hr.fecha_creacion DESC
+      ORDER BY hr.creado_en DESC
     `;
     const result = await pool.query(query);
     res.status(200).json(result.rows);
