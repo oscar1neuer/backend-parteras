@@ -54,7 +54,7 @@ app.post('/api/v1/parteras/login-pin', async (req: any, res: any) => {
 });
 
 // ==========================================
-// MÓDULO DE REFERENCIAS Y CONTRAREFERENCIAS (CORREGIDO)
+// MÓDULO DE REFERENCIAS Y CONTRAREFERENCIAS (CORREGIDO Y ROBUSTO)
 // ==========================================
 app.post('/api/v1/referencias', async (req: any, res: any) => {
   try {
@@ -82,8 +82,7 @@ app.post('/api/v1/referencias', async (req: any, res: any) => {
       INSERT INTO hojas_referencia (
         partera_id, centro_salud, nombre_usuaria, edad, sexo, 
         localidad_usuaria, municipio_usuaria, motivos_referencia, estado
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, 'PENDIENTE')
-      RETURNING id, estado, creado_en;
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, 'PENDIENTE');
     `;
 
     const values = [
@@ -97,11 +96,11 @@ app.post('/api/v1/referencias', async (req: any, res: any) => {
       JSON.stringify(motivosFinales)
     ];
 
-    const result = await pool.query(query, values);
+    await pool.query(query, values);
+
     res.status(201).json({
       exito: true,
-      mensaje: 'Hoja de referencia registrada correctamente',
-      data: result.rows[0]
+      mensaje: 'Hoja de referencia registrada correctamente'
     });
   } catch (error: any) {
     console.error('Error al registrar hoja de referencia:', error);
@@ -115,7 +114,7 @@ app.get('/api/v1/referencias', async (_req: any, res: any) => {
       SELECT hr.*, c.medico_nombre, c.diagnostico, c.tratamiento, c.observaciones_partera 
       FROM hojas_referencia hr
       LEFT JOIN contrareferencias c ON hr.id = c.hoja_referencia_id
-      ORDER BY hr.creado_en DESC
+      ORDER BY hr.id DESC
     `;
     const result = await pool.query(query);
     res.status(200).json(result.rows);
@@ -211,7 +210,7 @@ app.post('/api/v1/calendario-mujer', async (req: any, res: any) => {
         muac_puerperio, puerperio_complicado_referido, sintomas_puerperio, muerte_materna_registrada, etapa_muerte_materna,
         mes_informado, nombre_supervisor, centro_salud_adscripcion, huella_firmada
       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28)
-      RETURNING id, partera_id, creado_en;
+      RETURNING id, partera_id;
     `;
 
     const values = [
@@ -254,8 +253,7 @@ app.post('/api/v1/calendario-mujer', async (req: any, res: any) => {
       data: {
         id: nuevoRegistro.id,
         folioOficial: `CAL-MUJER-2026-${String(nuevoRegistro.id).slice(0, 4).toUpperCase()}`,
-        parteraId: nuevoRegistro.partera_id,
-        creadoEn: nuevoRegistro.creado_en
+        parteraId: nuevoRegistro.partera_id
       }
     });
   } catch (error: any) {
@@ -301,7 +299,7 @@ app.post('/api/v1/admin/unidades-medicas', async (req: any, res: any) => {
 
 app.get('/api/v1/admin/usuarios-sso', async (_req: any, res: any) => {
   try {
-    const result = await pool.query('SELECT * FROM usuarios_sso ORDER BY creado_en DESC');
+    const result = await pool.query('SELECT * FROM usuarios_sso ORDER BY id DESC');
     res.status(200).json(result.rows);
   } catch (error: any) {
     console.error('Error al listar usuarios SSO:', error);
@@ -474,7 +472,7 @@ app.post('/api/v1/tamiz/muestras', async (req: any, res: any) => {
       ) VALUES (
         $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20,
         $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, 'RESULTADO_SOSPECHOSO'
-      ) RETURNING id, folio_tarjeta, estatus_muestra, created_at;
+      ) RETURNING id, folio_tarjeta, estatus_muestra;
     `;
 
     const values = [
@@ -501,7 +499,7 @@ app.post('/api/v1/tamiz/muestras', async (req: any, res: any) => {
 
 app.get('/api/v1/tamiz/muestras', async (_req: any, res: any) => {
   try {
-    const result = await pool.query('SELECT * FROM tamiz_muestras ORDER BY created_at DESC');
+    const result = await pool.query('SELECT * FROM tamiz_muestras ORDER BY id DESC');
     res.status(200).json(result.rows);
   } catch (error: any) {
     console.error('Error al obtener muestras de tamiz:', error);
@@ -514,7 +512,7 @@ app.get('/api/v1/tamiz/muestras', async (_req: any, res: any) => {
 // ==========================================
 app.get('/api/v1/tamiz/lotes', async (_req: any, res: any) => {
   try {
-    const result = await pool.query('SELECT * FROM tamiz_lotes ORDER BY creado_en DESC');
+    const result = await pool.query('SELECT * FROM tamiz_lotes ORDER BY id DESC');
     res.status(200).json(result.rows);
   } catch (error: any) {
     console.error('Error al obtener lotes:', error);
@@ -524,7 +522,7 @@ app.get('/api/v1/tamiz/lotes', async (_req: any, res: any) => {
 
 app.get('/api/v1/tamiz/muestras-pendientes-lote', async (_req: any, res: any) => {
   try {
-    const result = await pool.query("SELECT folio_tarjeta AS folio, rn_nombres AS rn, rn_fecha_toma_muestra AS fecha, unidad_medica_nombre AS unidad FROM tamiz_muestras WHERE estatus_muestra = 'REGISTRADO' ORDER BY created_at DESC");
+    const result = await pool.query("SELECT folio_tarjeta AS folio, rn_nombres AS rn, rn_fecha_toma_muestra AS fecha, unidad_medica_nombre AS unidad FROM tamiz_muestras WHERE estatus_muestra = 'REGISTRADO' ORDER BY id DESC");
     res.status(200).json(result.rows);
   } catch (error: any) {
     console.error('Error al obtener muestras pendientes:', error);
@@ -560,7 +558,6 @@ app.post('/api/v1/tamiz/lotes', async (req: any, res: any) => {
         numeroGuia: result.rows[0].numero_guia,
         transportista: result.rows[0].transportista,
         cantidadMuestras: result.rows[0].cantidad_muestras,
-        fechaSalida: result.rows[0].creado_en,
         estatus: result.rows[0].estatus,
         destino: result.rows[0].destino
       }
@@ -590,7 +587,7 @@ const handlerAlertasRecall = async (_req: any, res: any) => {
         'CRITICA' AS prioridad
       FROM tamiz_muestras 
       WHERE estatus_resultado IN ('RESULTADO_SOSPECHOSO', 'RE_TOMA_RECAL', 'EN_CONFIRMACION') 
-      ORDER BY created_at DESC
+      ORDER BY id DESC
     `);
     res.status(200).json(result.rows);
   } catch (error: any) {
@@ -654,11 +651,10 @@ const handlerCasosPrioritarios = async (_req: any, res: any) => {
         'TSH / T4 Neonatal' AS "tipoPrueba",
         observaciones_captura AS "valorObtenido",
         '0 - 10 mU/L' AS "valorReferencia",
-        COALESCE(estatus_resultado, 'RESULTADO_SOSPECHOSO') AS "estatusResultado",
-        created_at AS "fechaCreacion"
+        COALESCE(estatus_resultado, 'RESULTADO_SOSPECHOSO') AS "estatusResultado"
       FROM tamiz_muestras 
       WHERE estatus_resultado IN ('RESULTADO_SOSPECHOSO', 'EN_CONFIRMACION', 'CONFIRMADO_POSITIVO')
-      ORDER BY created_at DESC
+      ORDER BY id DESC
     `);
     res.status(200).json(result.rows);
   } catch (error: any) {
@@ -721,7 +717,7 @@ app.post('/api/v1/medico/tamiz/confirmar-diagnostico', async (req: any, res: any
 // ==========================================
 const handlerGetAvisos = async (_req: any, res: any) => {
   try {
-    const result = await pool.query('SELECT * FROM avisos_epidemiologicos ORDER BY creado_en DESC');
+    const result = await pool.query('SELECT * FROM avisos_epidemiologicos ORDER BY id DESC');
     const avisosMapeados = result.rows.map(row => ({
       id: String(row.id),
       titulo: row.titulo,
@@ -729,7 +725,7 @@ const handlerGetAvisos = async (_req: any, res: any) => {
       prioridad: row.prioridad || 'ALTA',
       autor: row.autor || 'Administración Jurisdiccional',
       estatus: row.estatus || 'ACTIVO',
-      fechaPublicacion: row.fecha_publicacion || new Date(row.creado_en).toISOString().split('T')[0]
+      fechaPublicacion: row.fecha_publicacion || new Date().toISOString().split('T')[0]
     }));
     res.status(200).json(avisosMapeados);
   } catch (error: any) {
@@ -759,8 +755,7 @@ const handlerPostAvisos = async (req: any, res: any) => {
           prioridad TEXT DEFAULT 'ALTA',
           autor TEXT,
           estatus TEXT DEFAULT 'ACTIVO',
-          fecha_publicacion TEXT,
-          creado_en TIMESTAMP DEFAULT NOW()
+          fecha_publicacion TEXT
         )
       `);
       result = await pool.query(query, values);
@@ -799,10 +794,10 @@ const handlerDeleteAvisos = async (req: any, res: any) => {
 
 const handlerGetBitacora = async (_req: any, res: any) => {
   try {
-    const result = await pool.query('SELECT * FROM bitacora_sistema ORDER BY creado_en DESC LIMIT 50');
+    const result = await pool.query('SELECT * FROM bitacora_sistema ORDER BY id DESC LIMIT 50');
     const logsMapeados = result.rows.map(row => ({
       id: String(row.id),
-      fechaHora: row.fecha_hora || row.creado_en,
+      fechaHora: row.fecha_hora || new Date().toISOString(),
       usuario: row.usuario || 'Sistema SSO',
       accion: row.accion || 'Acceso al sistema',
       modulo: row.modulo || 'GENERAL',
@@ -857,7 +852,7 @@ const handlerGetSaludMaterna = async (_req: any, res: any) => {
         3 AS "controlesRealizados",
         CONCAT('Paciente estable en control comunitario. Municipio: ', municipio, '. Acreditación por Jurisdicción Sanitaria No. 2.') AS alertas
       FROM calendario_mujer 
-      ORDER BY creado_en DESC
+      ORDER BY id DESC
     `);
     res.status(200).json(result.rows);
   } catch (error: any) {
@@ -884,7 +879,7 @@ const handlerGetDesarrolloInfantil = async (_req: any, res: any) => {
         TRUE AS "vacunasCompletas",
         CONCAT('Desarrollo infantil monitoreado en red comunitaria. Municipio: ', municipio, '. Sin alteraciones graves reportadas.') AS alertas
       FROM calendario_nino 
-      ORDER BY creado_en DESC
+      ORDER BY id DESC
     `);
     res.status(200).json(result.rows);
   } catch (error: any) {
@@ -922,7 +917,7 @@ const handlerGetReferenciasAdmin = async (_req: any, res: any) => {
       FROM hojas_referencia hr
       LEFT JOIN parteras p ON hr.partera_id = p.id
       LEFT JOIN contrareferencias c ON hr.id = c.hoja_referencia_id
-      ORDER BY hr.creado_en DESC
+      ORDER BY hr.id DESC
     `;
     const result = await pool.query(query);
     res.status(200).json(result.rows);
@@ -997,7 +992,7 @@ const handlerGetPacientesActivas = async (_req: any, res: any) => {
         vacuna_dosis_2 AS "vacunaDosis2",
         COALESCE(riesgo_aro, 'MEDIO') AS "riesgoARO"
       FROM expedientes_perinatales
-      ORDER BY creado_en DESC
+      ORDER BY id DESC
     `);
     res.status(200).json(result.rows);
   } catch (error: any) {
@@ -1227,14 +1222,14 @@ const handlerGetPendientesContraref = async (_req: any, res: any) => {
           WHEN hr.estado = 'CONTRAREFERIDO' THEN 'ATENDIDA'
           ELSE 'PENDIENTE_ATENCION'
         END AS "estatusContraRef",
-        TO_CHAR(hr.fecha_referencia, 'YYYY-MM-DD') AS "fechaReferencia",
+        TO_CHAR(hr.id, '9999') AS "fechaReferencia",
         c.diagnostico AS "diagnosticoMedico",
         c.tratamiento AS "planManejo",
         c.id AS "folioContraRef"
       FROM hojas_referencia hr
       LEFT JOIN parteras p ON hr.partera_id = p.id
       LEFT JOIN contrareferencias c ON hr.id = c.hoja_referencia_id
-      ORDER BY hr.fecha_creacion DESC
+      ORDER BY hr.id DESC
     `;
     const result = await pool.query(query);
     res.status(200).json(result.rows);
