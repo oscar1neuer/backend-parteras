@@ -54,11 +54,32 @@ app.post('/api/v1/parteras/login-pin', async (req: any, res: any) => {
 });
 
 // ==========================================
-// MÓDULO DE REFERENCIAS Y CONTRAREFERENCIAS
+// MÓDULO DE REFERENCIAS Y CONTRAREFERENCIAS (CORREGIDO Y ROBUSTO)
 // ==========================================
 app.post('/api/v1/referencias', async (req: any, res: any) => {
   try {
-    const { parteraId, centroSalud, usuaria, motivosReferencia, fechaRegistro } = req.body;
+    const {
+      parteraId,
+      centroSalud,
+      usuaria,
+      nombreUsuaria,
+      edad,
+      sexo,
+      localidad,
+      municipio,
+      motivosReferencia,
+      motivos,
+      fechaRegistro,
+      fecha
+    } = req.body;
+
+    // Soportamos de manera flexible los datos planos del frontend o estructurados
+    const nombreFinalUsuaria = usuaria?.nombre || nombreUsuaria || 'Sin nombre';
+    const edadFinalUsuaria = usuaria?.edad || edad || 0;
+    const sexoFinalUsuaria = usuaria?.sexo || sexo || 'F';
+    const localidadFinalUsuaria = usuaria?.localidad || localidad || '';
+    const municipioFinalUsuaria = usuaria?.municipio || municipio || 'Juchitán de Zaragoza';
+    const motivosFinales = motivosReferencia || motivos || [];
 
     const query = `
       INSERT INTO hojas_referencia (
@@ -69,15 +90,15 @@ app.post('/api/v1/referencias', async (req: any, res: any) => {
     `;
 
     const values = [
-      parteraId,
-      centroSalud,
-      usuaria.nombre,
-      usuaria.edad,
-      usuaria.sexo,
-      fechaRegistro || new Date(),
-      usuaria.localidad,
-      usuaria.municipio,
-      JSON.stringify(motivosReferencia)
+      parteraId || null,
+      centroSalud || 'Hospital General',
+      nombreFinalUsuaria,
+      edadFinalUsuaria,
+      sexoFinalUsuaria,
+      fechaRegistro || fecha || new Date(),
+      localidadFinalUsuaria,
+      municipioFinalUsuaria,
+      JSON.stringify(motivosFinales)
     ];
 
     const result = await pool.query(query, values);
