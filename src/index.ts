@@ -85,7 +85,7 @@ app.post('/api/v1/referencias', async (req: any, res: any) => {
     const query = `
       INSERT INTO hojas_referencia (
         partera_id, centro_salud, nombre_usuaria, edad, sexo, 
-        fecha_referencia, localidad_usuaria, municipio_usuaria, motivos_referencia, estado
+        fecha, localidad_usuaria, municipio_usuaria, motivos_referencia, estado
       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, 'PENDIENTE')
       RETURNING id, estado, creado_en;
     `;
@@ -138,7 +138,7 @@ app.get('/api/v1/referencias', async (_req: any, res: any) => {
       SELECT hr.*, c.medico_nombre, c.diagnostico, c.tratamiento, c.observaciones_partera 
       FROM hojas_referencia hr
       LEFT JOIN contrareferencias c ON hr.id = c.hoja_referencia_id
-      ORDER BY hr.fecha_creacion DESC
+      ORDER BY hr.creado_en DESC
     `;
     const result = await pool.query(query);
     res.status(200).json(result.rows);
