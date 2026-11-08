@@ -1,12 +1,17 @@
 import express from 'express';
 import { pool } from './db';
 import * as jwt from 'jsonwebtoken';
-
 const cors = require('cors');
 
 const app = express();
 
-app.use(cors());
+// Configuración robusta de CORS para aceptar tokens y métodos institucionales
+app.use(cors({
+  origin: '*',
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+}));
+
 app.use(express.json());
 
 const JWT_SECRET = (globalThis as any).process?.env?.JWT_SECRET || 'secreto_jurisdiccion_2';
