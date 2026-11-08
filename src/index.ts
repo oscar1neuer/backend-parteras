@@ -3,19 +3,10 @@ import { pool } from './db';
 import * as jwt from 'jsonwebtoken';
 
 const cors = require('cors');
+
 const app = express();
 
-// ==========================================
-// CONFIGURACIÓN DE CORS GLOBAL Y PREFLIGHT
-// ==========================================
-app.use(cors({
-  origin: '*',
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
-  credentials: true
-}));
-
-app.options('*', cors());
+app.use(cors());
 app.use(express.json());
 
 const JWT_SECRET = (globalThis as any).process?.env?.JWT_SECRET || 'secreto_jurisdiccion_2';
@@ -44,17 +35,30 @@ app.post('/api/v1/parteras/login-pin', async (req: any, res: any) => {
     const partera = result.rows[0];
     const token = jwt.sign({ id: partera.id, rol: 'PARTERA_TRADICIONAL' }, JWT_SECRET, { expiresIn: '12h' });
 
+    // Armamos el nombre completo garantizando compatibilidad total con el frontend
+    const nombreReal = partera.nombre_completo ||
+      `${partera.nombre || ''} ${partera.apellido_paterno || ''} ${partera.apellido_materno || ''}`.trim() ||
+      'Partera Tradicional';
+
+    const comunidadReal = partera.comunidad || partera.comunidad_barrio || partera.localidad || 'Juchitán';
+    const municipioReal = partera.municipio || 'Juchitán de Zaragoza';
+    const fotoReal = partera.foto_url || partera.foto || '/avatar-partera-default.png';
+
     res.status(200).json({
       token,
       user: {
         id: partera.id,
-        nombre: partera.nombre_completo || `${partera.nombre || ''} ${partera.apellido_paterno || ''}`.trim(),
-        localidad: partera.comunidad || partera.comunidad_barrio || partera.localidad || 'Juchitán',
-        municipio: partera.municipio || 'Juchitán de Zaragoza',
+        nombre: nombreReal,
+        nombreCompleto: nombreReal,
+        localidad: comunidadReal,
+        comunidad: comunidadReal,
+        municipio: municipioReal,
+        foto: fotoReal,
+        avatar: fotoReal,
         rol: 'PARTERA_TRADICIONAL',
         activo: true
       },
-      message: `Bienvenida, ${partera.nombre_completo || partera.nombre}`
+      message: `Bienvenida, ${nombreReal}`
     });
   } catch (error: any) {
     console.error('Error en login de partera:', error);
@@ -67,55 +71,60 @@ app.post('/api/v1/parteras/login-pin', async (req: any, res: any) => {
 // ==========================================
 app.post('/api/v1/referencias', async (req: any, res: any) => {
   try {
-    const {
-      parteraId,
-      centroSalud,
-      usuaria,
-      nombreUsuaria,
-      edad,
-      sexo,
-      localidad,
-      municipio,
-      motivosReferencia,
-      motivos
-    } = req.body;
+    const { parteraId, centroSalud, usuaria, motivosReferencia, fechaRegistro, nombreUsuaria, edad, sexo, fecha, localidad, municipio, nombrePartera, localidadPartera, motivos, contrareferencia } = req.body;
 
-    // Sanitizamos parteraId para evitar errores si llega un string tipo UUID por defecto
-    let idParteraLimpio = null;
-    if (parteraId && !isNaN(Number(parteraId))) {
-      idParteraLimpio = Number(parteraId);
-    }
-
-    const nombreFinalUsuaria = usuaria?.nombre || nombreUsuaria || 'Sin nombre';
-    const edadFinalUsuaria = usuaria?.edad || edad || 0;
-    const sexoFinalUsuaria = usuaria?.sexo || sexo || 'F';
-    const localidadFinalUsuaria = usuaria?.localidad || localidad || '';
-    const municipioFinalUsuaria = usuaria?.municipio || municipio || 'Juchitán de Zaragoza';
-    const motivosFinales = motivosReferencia || motivos || [];
+    // Soporte dual para formato plano (del nuevo formulario) o estructurado
+    const finalNombreUsuaria = nombreUsuaria || usuaria?.nombre;
+    const finalEdad = edad !== undefined ? edad : usuaria?.edad;
+    const finalSexo = sexo || usuaria?.sexo || 'F';
+    const finalFecha = fecha || fechaRegistro || new Date();
+    const finalLocalidad = localidad || usuaria?.localidad;
+    const finalMunicipio = municipio || usuaria?.municipio;
+    const finalMotivos = motivos || motivosReferencia;
 
     const query = `
       INSERT INTO hojas_referencia (
         partera_id, centro_salud, nombre_usuaria, edad, sexo, 
-        localidad_usuaria, municipio_usuaria, motivos_referencia, estado
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, 'PENDIENTE');
+        fecha_referencia, localidad_usuaria, municipio_usuaria, motivos_referencia, estado
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, 'PENDIENTE')
+      RETURNING id, estado, creado_en;
     `;
 
     const values = [
-      idParteraLimpio,
-      centroSalud || 'Hospital General',
-      nombreFinalUsuaria,
-      edadFinalUsuaria,
-      sexoFinalUsuaria,
-      localidadFinalUsuaria,
-      municipioFinalUsuaria,
-      JSON.stringify(motivosFinales)
+      parteraId && parteraId !== 'DEFAULT-PARTERA-UUID' ? parteraId : null,
+      centroSalud,
+      finalNombreUsuaria,
+      finalEdad,
+      finalSexo,
+      finalFecha,
+      finalLocalidad,
+      finalMunicipio,
+      JSON.stringify(finalMotivos)
     ];
 
-    await pool.query(query, values);
+    const result = await pool.query(query, values);
+
+    // Si viene con contrarreferencia inicial
+    if (contrareferencia && contrareferencia.activa) {
+      await pool.query(
+        `INSERT INTO contrareferencias (hoja_referencia_id, medico_nombre, diagnostico, tratamiento, observaciones_partera, estatus, fecha_respuesta)
+         VALUES ($1, $2, $3, $4, $5, $6, NOW())`,
+        [
+          result.rows[0].id,
+          contrareferencia.nombreMedico || 'Médico Tratante',
+          contrareferencia.diagnostico || '',
+          contrareferencia.tratamiento || '',
+          contrareferencia.observacionesMedico || '',
+          contrareferencia.estadoContra || 'CONTRAREFERIDO'
+        ]
+      );
+      await pool.query("UPDATE hojas_referencia SET estado = 'CONTRAREFERIDO' WHERE id = $1", [result.rows[0].id]);
+    }
 
     res.status(201).json({
       exito: true,
-      mensaje: 'Hoja de referencia registrada correctamente'
+      mensaje: 'Hoja de referencia registrada correctamente',
+      data: result.rows[0]
     });
   } catch (error: any) {
     console.error('Error al registrar hoja de referencia:', error);
@@ -129,7 +138,7 @@ app.get('/api/v1/referencias', async (_req: any, res: any) => {
       SELECT hr.*, c.medico_nombre, c.diagnostico, c.tratamiento, c.observaciones_partera 
       FROM hojas_referencia hr
       LEFT JOIN contrareferencias c ON hr.id = c.hoja_referencia_id
-      ORDER BY hr.id DESC
+      ORDER BY hr.fecha_creacion DESC
     `;
     const result = await pool.query(query);
     res.status(200).json(result.rows);
@@ -147,7 +156,7 @@ app.post('/api/v1/referencias/:id/contrareferencia', async (req: any, res: any) 
     const insertQuery = `
       INSERT INTO contrareferencias (hoja_referencia_id, medico_nombre, diagnostico, tratamiento, observaciones_partera)
       VALUES ($1, $2, $3, $4, $5)
-      RETURNING id;
+      RETURNING id, fecha_respuesta;
     `;
     const insertValues = [id, medicoNombre, diagnostico, tratamiento, observacionesPartera || null];
     const contraResult = await pool.query(insertQuery, insertValues);
@@ -225,7 +234,7 @@ app.post('/api/v1/calendario-mujer', async (req: any, res: any) => {
         muac_puerperio, puerperio_complicado_referido, sintomas_puerperio, muerte_materna_registrada, etapa_muerte_materna,
         mes_informado, nombre_supervisor, centro_salud_adscripcion, huella_firmada
       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28)
-      RETURNING id, partera_id;
+      RETURNING id, partera_id, creado_en;
     `;
 
     const values = [
@@ -268,7 +277,8 @@ app.post('/api/v1/calendario-mujer', async (req: any, res: any) => {
       data: {
         id: nuevoRegistro.id,
         folioOficial: `CAL-MUJER-2026-${String(nuevoRegistro.id).slice(0, 4).toUpperCase()}`,
-        parteraId: nuevoRegistro.partera_id
+        parteraId: nuevoRegistro.partera_id,
+        creadoEn: nuevoRegistro.creado_en
       }
     });
   } catch (error: any) {
@@ -314,7 +324,7 @@ app.post('/api/v1/admin/unidades-medicas', async (req: any, res: any) => {
 
 app.get('/api/v1/admin/usuarios-sso', async (_req: any, res: any) => {
   try {
-    const result = await pool.query('SELECT * FROM usuarios_sso ORDER BY id DESC');
+    const result = await pool.query('SELECT * FROM usuarios_sso ORDER BY creado_en DESC');
     res.status(200).json(result.rows);
   } catch (error: any) {
     console.error('Error al listar usuarios SSO:', error);
@@ -487,7 +497,7 @@ app.post('/api/v1/tamiz/muestras', async (req: any, res: any) => {
       ) VALUES (
         $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20,
         $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, 'RESULTADO_SOSPECHOSO'
-      ) RETURNING id, folio_tarjeta, estatus_muestra;
+      ) RETURNING id, folio_tarjeta, estatus_muestra, created_at;
     `;
 
     const values = [
@@ -514,7 +524,7 @@ app.post('/api/v1/tamiz/muestras', async (req: any, res: any) => {
 
 app.get('/api/v1/tamiz/muestras', async (_req: any, res: any) => {
   try {
-    const result = await pool.query('SELECT * FROM tamiz_muestras ORDER BY id DESC');
+    const result = await pool.query('SELECT * FROM tamiz_muestras ORDER BY created_at DESC');
     res.status(200).json(result.rows);
   } catch (error: any) {
     console.error('Error al obtener muestras de tamiz:', error);
@@ -527,7 +537,7 @@ app.get('/api/v1/tamiz/muestras', async (_req: any, res: any) => {
 // ==========================================
 app.get('/api/v1/tamiz/lotes', async (_req: any, res: any) => {
   try {
-    const result = await pool.query('SELECT * FROM tamiz_lotes ORDER BY id DESC');
+    const result = await pool.query('SELECT * FROM tamiz_lotes ORDER BY creado_en DESC');
     res.status(200).json(result.rows);
   } catch (error: any) {
     console.error('Error al obtener lotes:', error);
@@ -537,7 +547,7 @@ app.get('/api/v1/tamiz/lotes', async (_req: any, res: any) => {
 
 app.get('/api/v1/tamiz/muestras-pendientes-lote', async (_req: any, res: any) => {
   try {
-    const result = await pool.query("SELECT folio_tarjeta AS folio, rn_nombres AS rn, rn_fecha_toma_muestra AS fecha, unidad_medica_nombre AS unidad FROM tamiz_muestras WHERE estatus_muestra = 'REGISTRADO' ORDER BY id DESC");
+    const result = await pool.query("SELECT folio_tarjeta AS folio, rn_nombres AS rn, rn_fecha_toma_muestra AS fecha, unidad_medica_nombre AS unidad FROM tamiz_muestras WHERE estatus_muestra = 'REGISTRADO' ORDER BY created_at DESC");
     res.status(200).json(result.rows);
   } catch (error: any) {
     console.error('Error al obtener muestras pendientes:', error);
@@ -573,6 +583,7 @@ app.post('/api/v1/tamiz/lotes', async (req: any, res: any) => {
         numeroGuia: result.rows[0].numero_guia,
         transportista: result.rows[0].transportista,
         cantidadMuestras: result.rows[0].cantidad_muestras,
+        fechaSalida: result.rows[0].creado_en,
         estatus: result.rows[0].estatus,
         destino: result.rows[0].destino
       }
@@ -602,7 +613,7 @@ const handlerAlertasRecall = async (_req: any, res: any) => {
         'CRITICA' AS prioridad
       FROM tamiz_muestras 
       WHERE estatus_resultado IN ('RESULTADO_SOSPECHOSO', 'RE_TOMA_RECAL', 'EN_CONFIRMACION') 
-      ORDER BY id DESC
+      ORDER BY created_at DESC
     `);
     res.status(200).json(result.rows);
   } catch (error: any) {
@@ -641,8 +652,10 @@ const handlerAgendarRetoma = async (req: any, res: any) => {
 
 app.get('/api/v1/tamiz/alertas-recall', handlerAlertasRecall);
 app.get('/api/tamiz/alertas-recall', handlerAlertasRecall);
+
 app.post('/api/v1/tamiz/notificar-recall', handlerNotificarRecall);
 app.post('/api/tamiz/notificar-recall', handlerNotificarRecall);
+
 app.post('/api/v1/tamiz/agendar-retoma', handlerAgendarRetoma);
 app.post('/api/tamiz/agendar-retoma', handlerAgendarRetoma);
 
@@ -664,10 +677,11 @@ const handlerCasosPrioritarios = async (_req: any, res: any) => {
         'TSH / T4 Neonatal' AS "tipoPrueba",
         observaciones_captura AS "valorObtenido",
         '0 - 10 mU/L' AS "valorReferencia",
-        COALESCE(estatus_resultado, 'RESULTADO_SOSPECHOSO') AS "estatusResultado"
+        COALESCE(estatus_resultado, 'RESULTADO_SOSPECHOSO') AS "estatusResultado",
+        created_at AS "fechaCreacion"
       FROM tamiz_muestras 
       WHERE estatus_resultado IN ('RESULTADO_SOSPECHOSO', 'EN_CONFIRMACION', 'CONFIRMADO_POSITIVO')
-      ORDER BY id DESC
+      ORDER BY created_at DESC
     `);
     res.status(200).json(result.rows);
   } catch (error: any) {
@@ -699,6 +713,7 @@ const handlerSegundaMuestra = async (req: any, res: any) => {
 app.get('/api/v1/medico/tamiz/casos-prioritarios', handlerCasosPrioritarios);
 app.get('/api/medico/tamiz/casos-prioritarios', handlerCasosPrioritarios);
 app.get('/medico/tamiz/casos-prioritarios', handlerCasosPrioritarios);
+
 app.post('/api/v1/medico/tamiz/solicitar-segunda-muestra', handlerSegundaMuestra);
 app.post('/api/medico/tamiz/solicitar-segunda-muestra', handlerSegundaMuestra);
 app.post('/medico/tamiz/solicitar-segunda-muestra', handlerSegundaMuestra);
@@ -729,7 +744,7 @@ app.post('/api/v1/medico/tamiz/confirmar-diagnostico', async (req: any, res: any
 // ==========================================
 const handlerGetAvisos = async (_req: any, res: any) => {
   try {
-    const result = await pool.query('SELECT * FROM avisos_epidemiologicos ORDER BY id DESC');
+    const result = await pool.query('SELECT * FROM avisos_epidemiologicos ORDER BY creado_en DESC');
     const avisosMapeados = result.rows.map(row => ({
       id: String(row.id),
       titulo: row.titulo,
@@ -737,7 +752,7 @@ const handlerGetAvisos = async (_req: any, res: any) => {
       prioridad: row.prioridad || 'ALTA',
       autor: row.autor || 'Administración Jurisdiccional',
       estatus: row.estatus || 'ACTIVO',
-      fechaPublicacion: row.fecha_publicacion || new Date().toISOString().split('T')[0]
+      fechaPublicacion: row.fecha_publicacion || new Date(row.creado_en).toISOString().split('T')[0]
     }));
     res.status(200).json(avisosMapeados);
   } catch (error: any) {
@@ -767,7 +782,8 @@ const handlerPostAvisos = async (req: any, res: any) => {
           prioridad TEXT DEFAULT 'ALTA',
           autor TEXT,
           estatus TEXT DEFAULT 'ACTIVO',
-          fecha_publicacion TEXT
+          fecha_publicacion TEXT,
+          creado_en TIMESTAMP DEFAULT NOW()
         )
       `);
       result = await pool.query(query, values);
@@ -806,10 +822,10 @@ const handlerDeleteAvisos = async (req: any, res: any) => {
 
 const handlerGetBitacora = async (_req: any, res: any) => {
   try {
-    const result = await pool.query('SELECT * FROM bitacora_sistema ORDER BY id DESC LIMIT 50');
+    const result = await pool.query('SELECT * FROM bitacora_sistema ORDER BY creado_en DESC LIMIT 50');
     const logsMapeados = result.rows.map(row => ({
       id: String(row.id),
-      fechaHora: row.fecha_hora || new Date().toISOString(),
+      fechaHora: row.fecha_hora || row.creado_en,
       usuario: row.usuario || 'Sistema SSO',
       accion: row.accion || 'Acceso al sistema',
       modulo: row.modulo || 'GENERAL',
@@ -834,6 +850,7 @@ app.get('/admin/avisos', handlerGetAvisos);
 app.post('/admin/avisos', handlerPostAvisos);
 app.delete('/admin/avisos/:id', handlerDeleteAvisos);
 app.get('/admin/bitacora', handlerGetBitacora);
+
 app.get('/api/v1/admin/avisos', handlerGetAvisos);
 app.post('/api/v1/admin/avisos', handlerPostAvisos);
 app.delete('/api/v1/admin/avisos/:id', handlerDeleteAvisos);
@@ -863,7 +880,7 @@ const handlerGetSaludMaterna = async (_req: any, res: any) => {
         3 AS "controlesRealizados",
         CONCAT('Paciente estable en control comunitario. Municipio: ', municipio, '. Acreditación por Jurisdicción Sanitaria No. 2.') AS alertas
       FROM calendario_mujer 
-      ORDER BY id DESC
+      ORDER BY creado_en DESC
     `);
     res.status(200).json(result.rows);
   } catch (error: any) {
@@ -890,7 +907,7 @@ const handlerGetDesarrolloInfantil = async (_req: any, res: any) => {
         TRUE AS "vacunasCompletas",
         CONCAT('Desarrollo infantil monitoreado en red comunitaria. Municipio: ', municipio, '. Sin alteraciones graves reportadas.') AS alertas
       FROM calendario_nino 
-      ORDER BY id DESC
+      ORDER BY creado_en DESC
     `);
     res.status(200).json(result.rows);
   } catch (error: any) {
@@ -928,7 +945,7 @@ const handlerGetReferenciasAdmin = async (_req: any, res: any) => {
       FROM hojas_referencia hr
       LEFT JOIN parteras p ON hr.partera_id = p.id
       LEFT JOIN contrareferencias c ON hr.id = c.hoja_referencia_id
-      ORDER BY hr.id DESC
+      ORDER BY hr.creado_en DESC
     `;
     const result = await pool.query(query);
     res.status(200).json(result.rows);
@@ -981,7 +998,7 @@ app.get('/api/v1/admin/referencias', handlerGetReferenciasAdmin);
 app.patch('/api/v1/admin/referencias/:id/contrareferencia', handlerPatchContrareferenciaAdmin);
 
 // ==========================================
-// MÓDULO DE EXPEDIENTE PERINATAL (CARNÉ CLAP)
+// MÓDULO DE EXPEDIENTE PERINATAL (CARNÉ CLAP) - SOPORTE DUAL
 // ==========================================
 const handlerGetPacientesActivas = async (_req: any, res: any) => {
   try {
@@ -1003,11 +1020,11 @@ const handlerGetPacientesActivas = async (_req: any, res: any) => {
         vacuna_dosis_2 AS "vacunaDosis2",
         COALESCE(riesgo_aro, 'MEDIO') AS "riesgoARO"
       FROM expedientes_perinatales
-      ORDER BY id DESC
+      ORDER BY creado_en DESC
     `);
     res.status(200).json(result.rows);
   } catch (error: any) {
-    console.warn('Aviso: Tabla expedientes_perinatales no encontrada o vacía:', error.message);
+    console.warn('Aviso: Tabla expedientes_perinatales no encontrada o vacía, retornando datos vacíos:', error.message);
     res.status(200).json([]);
   }
 };
@@ -1196,6 +1213,7 @@ const handlerPostParto = async (req: any, res: any) => {
   }
 };
 
+// Registro de rutas perinatales con soporte dual
 const registrarRutasPerinatales = (prefix: string) => {
   app.get(`${prefix}/medico/perinatales/pacientes-activas`, handlerGetPacientesActivas);
   app.get(`${prefix}/medico/perinatales/expediente/:id`, handlerGetExpedienteId);
@@ -1232,14 +1250,14 @@ const handlerGetPendientesContraref = async (_req: any, res: any) => {
           WHEN hr.estado = 'CONTRAREFERIDO' THEN 'ATENDIDA'
           ELSE 'PENDIENTE_ATENCION'
         END AS "estatusContraRef",
-        TO_CHAR(NOW(), 'YYYY-MM-DD') AS "fechaReferencia",
+        TO_CHAR(hr.fecha_referencia, 'YYYY-MM-DD') AS "fechaReferencia",
         c.diagnostico AS "diagnosticoMedico",
         c.tratamiento AS "planManejo",
         c.id AS "folioContraRef"
       FROM hojas_referencia hr
       LEFT JOIN parteras p ON hr.partera_id = p.id
       LEFT JOIN contrareferencias c ON hr.id = c.hoja_referencia_id
-      ORDER BY hr.id DESC
+      ORDER BY hr.fecha_creacion DESC
     `;
     const result = await pool.query(query);
     res.status(200).json(result.rows);
