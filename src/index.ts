@@ -1,21 +1,24 @@
 import express from 'express';
 import { pool } from './db';
 import * as jwt from 'jsonwebtoken';
-const cors = require('cors');
 
+const cors = require('cors');
 const app = express();
 
-// Configuración estricta para evitar bloqueos CORS en el navegador
-app.use(cors({
-  origin: '*',
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
-  credentials: true
-}));
+// ==========================================
+// CONFIGURACIÓN GLOBAL DE CORS (SOLUCIÓN DEFINITIVA)
+// ==========================================
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(200);
+  }
+  next();
+});
 
-// Responder inmediatamente a las peticiones de verificación previa del navegador
-app.options('*', cors());
-
+app.use(cors());
 app.use(express.json());
 
 const JWT_SECRET = (globalThis as any).process?.env?.JWT_SECRET || 'secreto_jurisdiccion_2';
