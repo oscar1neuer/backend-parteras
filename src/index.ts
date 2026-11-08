@@ -1,11 +1,11 @@
 import express from 'express';
 import { pool } from './db';
 import * as jwt from 'jsonwebtoken';
-
 const cors = require('cors');
+
 const app = express();
 
-// Configuración completa de CORS para aceptar preflight y tokens de autorización
+// Configuración estricta para evitar bloqueos CORS en el navegador
 app.use(cors({
   origin: '*',
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
@@ -13,7 +13,9 @@ app.use(cors({
   credentials: true
 }));
 
-app.options('*', cors()); // Habilita la respuesta para las peticiones de comprobación previa del navegador
+// Responder inmediatamente a las peticiones de verificación previa del navegador
+app.options('*', cors());
+
 app.use(express.json());
 
 const JWT_SECRET = (globalThis as any).process?.env?.JWT_SECRET || 'secreto_jurisdiccion_2';
