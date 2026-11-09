@@ -12,36 +12,64 @@ app.use(express.json());
 const JWT_SECRET = (globalThis as any).process?.env?.JWT_SECRET || 'secreto_jurisdiccion_2';
 
 // ==========================================
-// MÓDULO DE PARTERAS Y AUTENTICACIÓN
+// AUTO-INICIALIZACIÓN DE TABLA PARTERAS (SEGURIDAD DE ESQUEMA)
+// ==========================================
+const asegurarTablaParteras = async () => {
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS parteras (
+        id SERIAL PRIMARY KEY,
+        codigo_qr VARCHAR(100),
+        pin VARCHAR(10),
+        nombre_completo TEXT,
+        localidad VARCHAR(150),
+        municipio VARCHAR(150),
+        creado_en TIMESTAMP DEFAULT NOW()
+      );
+    `);
+    // Asegurar columnas por si la tabla ya existía incompleta
+    await pool.query(`ALTER TABLE parteras ADD COLUMN IF NOT EXISTS codigo_qr VARCHAR(100);`);
+    await pool.query(`ALTER TABLE parteras ADD COLUMN IF NOT EXISTS pin VARCHAR(10);`);
+    await pool.query(`ALTER TABLE parteras ADD COLUMN IF NOT EXISTS nombre_completo TEXT;`);
+    await pool.query(`ALTER TABLE parteras ADD COLUMN IF NOT EXISTS localidad VARCHAR(150);`);
+    await pool.query(`ALTER TABLE parteras ADD COLUMN IF NOT EXISTS municipio VARCHAR(150);`);
+    await pool.query(`ALTER TABLE parteras ADD COLUMN IF NOT EXISTS creado_en TIMESTAMP DEFAULT NOW();`);
+    console.log('✓ Tabla parteras verificada y actualizada correctamente.');
+  } catch (e: any) {
+    console.error('Aviso al verificar esquema de parteras:', e.message);
+  }
+};
+asegurarTablaParteras();
+
+// ==========================================
+// MÓDULO DE PARTERAS Y AUTENTICACIÓN (LOGIN PIN / QR)
 // ==========================================
 app.post('/api/v1/parteras/login-pin', async (req: any, res: any) => {
   try {
     const { pin, codigo_qr } = req.body;
-    const codigoBusqueda = pin || codigo_qr;
+    const codigoBusqueda = (pin || codigo_qr || '').toString().trim();
 
-    if (!codigoBusqueda || String(codigoBusqueda).trim().length !== 4) {
-      return res.status(400).json({ exito: false, message: 'El PIN o código de acceso debe ser de 4 dígitos' });
+    if (!codigoBusqueda) {
+      return res.status(400).json({ exito: false, message: 'Debe proporcionar el PIN o el código QR de acceso' });
     }
 
+    // Buscamos tanto por PIN como por código QR
     const result = await pool.query(
-      'SELECT * FROM parteras WHERE pin = $1',
-      [String(codigoBusqueda).trim()]
+      'SELECT * FROM parteras WHERE pin = $1 OR codigo_qr = $2',
+      [codigoBusqueda, codigoBusqueda]
     );
 
     if (result.rows.length === 0) {
-      return res.status(401).json({ exito: false, message: 'PIN inválido o partera no registrada en el sistema' });
+      return res.status(401).json({ exito: false, message: 'PIN o Código QR inválido, partera no registrada' });
     }
 
     const partera = result.rows[0];
     const token = jwt.sign({ id: partera.id, rol: 'PARTERA_TRADICIONAL' }, JWT_SECRET, { expiresIn: '12h' });
 
-    const nombreReal = partera.nombre_completo ||
-      `${partera.nombre || ''} ${partera.apellido_paterno || ''} ${partera.apellido_materno || ''}`.trim() ||
-      'Partera Tradicional';
-
-    const comunidadReal = partera.comunidad || partera.comunidad_barrio || partera.localidad || 'Juchitán';
+    const nombreReal = partera.nombre_completo || 'Partera Tradicional';
+    const comunidadReal = partera.localidad || 'Juchitán';
     const municipioReal = partera.municipio || 'Juchitán de Zaragoza';
-    const fotoReal = partera.foto_url || partera.foto || '/avatar-partera-default.png';
+    const fotoReal = '/avatar-partera-default.png';
 
     res.status(200).json({
       token,
@@ -365,7 +393,7 @@ app.post('/api/v1/admin/usuarios-sso', async (req: any, res: any) => {
 });
 
 // ==========================================
-// CONTROLADORES DE PARTERAS (CORREGIDO: ORDER BY id DESC)
+// CONTROLADORES DE PARTERAS (REGISTRO Y LISTADO)
 // ==========================================
 const handlerGetParteras = async (_req: any, res: any) => {
   try {
@@ -383,48 +411,30 @@ app.get('/api/v1/admin/parteras', handlerGetParteras);
 app.post('/api/v1/admin/parteras', async (req: any, res: any) => {
   try {
     const {
-      nombre, apellidoPaterno, apellidoMaterno, curp,
-      lenguaMaterna, telefonoRecaudo, telefono, municipio,
-      comunidadBarrio, comunidad, pinAcceso, pin, codigoQr, codigo_qr
+      nombre, apellidoPaterno, apellidoMaterno,
+      municipio, comunidadBarrio, comunidad, pinAcceso, pin, codigoQr, codigo_qr
     } = req.body;
 
     let pinFinal = pin || pinAcceso;
-    if (!pinFinal || pinFinal.length !== 4) {
+    if (!pinFinal || String(pinFinal).length !== 4) {
       pinFinal = Math.floor(1000 + Math.random() * 9000).toString();
     }
 
     const qrFinal = codigo_qr || codigoQr || `QR-PART-${Math.floor(100000 + Math.random() * 900000)}`;
     const nombreCompletoReal = `${nombre || ''} ${apellidoPaterno || ''} ${apellidoMaterno || ''}`.trim() || 'Partera Tradicional';
+    const localidadReal = comunidadBarrio || comunidad || 'Juchitán';
+    const municipioReal = municipio || 'Juchitán de Zaragoza';
 
-    let result: any = null;
-    let intentos = 0;
-    const maxIntentos = 3;
+    const query = `
+      INSERT INTO parteras (
+        codigo_qr, pin, nombre_completo, localidad, municipio
+      )
+      VALUES ($1, $2, $3, $4, $5)
+      RETURNING id, codigo_qr, pin, nombre_completo;
+    `;
 
-    while (intentos < maxIntentos) {
-      try {
-        const query = `
-          INSERT INTO parteras (
-            codigo_qr, pin, nombre_completo, localidad, municipio
-          )
-          VALUES ($1, $2, $3, $4, $5)
-          RETURNING id, codigo_qr, pin, nombre_completo;
-        `;
-
-        const values = [
-          qrFinal, pinFinal, nombreCompletoReal, comunidadBarrio || comunidad || 'Juchitán', municipio || 'Juchitán de Zaragoza'
-        ];
-
-        result = await pool.query(query, values);
-        break;
-      } catch (dbError: any) {
-        if (dbError.code === '23505' && intentos < maxIntentos - 1) {
-          pinFinal = Math.floor(1000 + Math.random() * 9000).toString();
-          intentos++;
-        } else {
-          throw dbError;
-        }
-      }
-    }
+    const values = [qrFinal, String(pinFinal), nombreCompletoReal, localidadReal, municipioReal];
+    const result = await pool.query(query, values);
 
     res.status(201).json({
       success: true,
