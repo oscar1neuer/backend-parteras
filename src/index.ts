@@ -12,7 +12,7 @@ app.use(express.json());
 const JWT_SECRET = (globalThis as any).process?.env?.JWT_SECRET || 'secreto_jurisdiccion_2';
 
 // ==========================================
-// AUTO-INICIALIZACIÓN DE TABLA PARTERAS (SEGURIDAD DE ESQUEMA)
+// AUTO-INICIALIZACIÓN Y ESQUEMA DE PARTERAS
 // ==========================================
 const asegurarTablaParteras = async () => {
   try {
@@ -21,20 +21,27 @@ const asegurarTablaParteras = async () => {
         id SERIAL PRIMARY KEY,
         codigo_qr VARCHAR(100),
         pin VARCHAR(10),
+        nombre VARCHAR(150),
+        apellido_paterno VARCHAR(150),
+        apellido_materno VARCHAR(150),
         nombre_completo TEXT,
+        curp VARCHAR(20),
         localidad VARCHAR(150),
         municipio VARCHAR(150),
         creado_en TIMESTAMP DEFAULT NOW()
       );
     `);
-    // Asegurar columnas por si la tabla ya existía incompleta
+    // Asegurar columnas por si la tabla ya existía de otra versión
     await pool.query(`ALTER TABLE parteras ADD COLUMN IF NOT EXISTS codigo_qr VARCHAR(100);`);
     await pool.query(`ALTER TABLE parteras ADD COLUMN IF NOT EXISTS pin VARCHAR(10);`);
+    await pool.query(`ALTER TABLE parteras ADD COLUMN IF NOT EXISTS nombre VARCHAR(150);`);
+    await pool.query(`ALTER TABLE parteras ADD COLUMN IF NOT EXISTS apellido_paterno VARCHAR(150);`);
+    await pool.query(`ALTER TABLE parteras ADD COLUMN IF NOT EXISTS apellido_materno VARCHAR(150);`);
     await pool.query(`ALTER TABLE parteras ADD COLUMN IF NOT EXISTS nombre_completo TEXT;`);
+    await pool.query(`ALTER TABLE parteras ADD COLUMN IF NOT EXISTS curp VARCHAR(20);`);
     await pool.query(`ALTER TABLE parteras ADD COLUMN IF NOT EXISTS localidad VARCHAR(150);`);
     await pool.query(`ALTER TABLE parteras ADD COLUMN IF NOT EXISTS municipio VARCHAR(150);`);
-    await pool.query(`ALTER TABLE parteras ADD COLUMN IF NOT EXISTS creado_en TIMESTAMP DEFAULT NOW();`);
-    console.log('✓ Tabla parteras verificada y actualizada correctamente.');
+    console.log('✓ Tabla parteras verificada y sincronizada correctamente.');
   } catch (e: any) {
     console.error('Aviso al verificar esquema de parteras:', e.message);
   }
@@ -42,7 +49,7 @@ const asegurarTablaParteras = async () => {
 asegurarTablaParteras();
 
 // ==========================================
-// MÓDULO DE PARTERAS Y AUTENTICACIÓN (LOGIN PIN / QR)
+// MÓDULO DE PARTERAS Y AUTENTICACIÓN
 // ==========================================
 app.post('/api/v1/parteras/login-pin', async (req: any, res: any) => {
   try {
@@ -53,7 +60,6 @@ app.post('/api/v1/parteras/login-pin', async (req: any, res: any) => {
       return res.status(400).json({ exito: false, message: 'Debe proporcionar el PIN o el código QR de acceso' });
     }
 
-    // Buscamos tanto por PIN como por código QR
     const result = await pool.query(
       'SELECT * FROM parteras WHERE pin = $1 OR codigo_qr = $2',
       [codigoBusqueda, codigoBusqueda]
@@ -66,7 +72,10 @@ app.post('/api/v1/parteras/login-pin', async (req: any, res: any) => {
     const partera = result.rows[0];
     const token = jwt.sign({ id: partera.id, rol: 'PARTERA_TRADICIONAL' }, JWT_SECRET, { expiresIn: '12h' });
 
-    const nombreReal = partera.nombre_completo || 'Partera Tradicional';
+    const nombreReal = partera.nombre_completo ||
+      `${partera.nombre || ''} ${partera.apellido_paterno || ''} ${partera.apellido_materno || ''}`.trim() ||
+      'Partera Tradicional';
+
     const comunidadReal = partera.localidad || 'Juchitán';
     const municipioReal = partera.municipio || 'Juchitán de Zaragoza';
     const fotoReal = '/avatar-partera-default.png';
@@ -411,7 +420,7 @@ app.get('/api/v1/admin/parteras', handlerGetParteras);
 app.post('/api/v1/admin/parteras', async (req: any, res: any) => {
   try {
     const {
-      nombre, apellidoPaterno, apellidoMaterno,
+      nombre, apellidoPaterno, apellidoMaterno, curp,
       municipio, comunidadBarrio, comunidad, pinAcceso, pin, codigoQr, codigo_qr
     } = req.body;
 
@@ -421,19 +430,27 @@ app.post('/api/v1/admin/parteras', async (req: any, res: any) => {
     }
 
     const qrFinal = codigo_qr || codigoQr || `QR-PART-${Math.floor(100000 + Math.random() * 900000)}`;
-    const nombreCompletoReal = `${nombre || ''} ${apellidoPaterno || ''} ${apellidoMaterno || ''}`.trim() || 'Partera Tradicional';
+    const nombreVal = nombre || 'Partera';
+    const apellidoPaternoVal = apellidoPaterno || '';
+    const apellidoMaternoVal = apellidoMaterno || '';
+    const nombreCompletoReal = `${nombreVal} ${apellidoPaternoVal} ${apellidoMaternoVal}`.trim();
     const localidadReal = comunidadBarrio || comunidad || 'Juchitán';
     const municipioReal = municipio || 'Juchitán de Zaragoza';
+    const curpReal = curp || '';
 
     const query = `
       INSERT INTO parteras (
-        codigo_qr, pin, nombre_completo, localidad, municipio
+        codigo_qr, pin, nombre, apellido_paterno, apellido_materno, nombre_completo, curp, localidad, municipio
       )
-      VALUES ($1, $2, $3, $4, $5)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
       RETURNING id, codigo_qr, pin, nombre_completo;
     `;
 
-    const values = [qrFinal, String(pinFinal), nombreCompletoReal, localidadReal, municipioReal];
+    const values = [
+      qrFinal, String(pinFinal), nombreVal, apellidoPaternoVal, apellidoMaternoVal,
+      nombreCompletoReal, curpReal, localidadReal, municipioReal
+    ];
+
     const result = await pool.query(query, values);
 
     res.status(201).json({
@@ -902,7 +919,7 @@ const handlerGetReferenciasAdmin = async (_req: any, res: any) => {
         COALESCE(hr.estado, 'PENDIENTE') AS estatus,
         c.tratamiento AS "respuestaContrareferencia"
       FROM hojas_referencia hr
-      LEFT JOIN contrareferencias c ON hr.id = c.hoja_referencia_id
+      LEFT JOIN contrareferencias c hr.id = c.hoja_referencia_id
       ORDER BY hr.id DESC
     `;
     const result = await pool.query(query);
