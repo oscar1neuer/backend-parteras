@@ -902,7 +902,7 @@ app.get('/api/v1/admin/calendarios/salud-materna', handlerGetSaludMaterna);
 app.get('/api/v1/admin/calendarios/desarrollo-infantil', handlerGetDesarrolloInfantil);
 
 // ==========================================
-// MÓDULO DE REFERENCIAS (ADMINISTRACIÓN)
+// MÓDULO DE REFERENCIAS (ADMINISTRACIÓN) - CORREGIDO
 // ==========================================
 const handlerGetReferenciasAdmin = async (_req: any, res: any) => {
   try {
@@ -912,19 +912,21 @@ const handlerGetReferenciasAdmin = async (_req: any, res: any) => {
         'REF-2026-' || LPAD(CAST(hr.id AS TEXT), 4, '0') AS folio,
         hr.nombre_usuaria AS "nombrePaciente",
         COALESCE(hr.edad, 25) AS edad,
-        'Partera Tradicional Acreditada' AS "parteraNombre",
+        COALESCE(p.nombre_completo, 'Partera Tradicional Acreditada') AS "parteraNombre",
         COALESCE(CAST(hr.motivos_referencia AS TEXT), 'Canalización por factores de riesgo') AS "motivoReferencia",
         COALESCE(hr.centro_salud, 'Hospital General de Juchitán') AS "unidadDestino",
         COALESCE(hr.municipio_usuaria, 'Juchitán de Zaragoza') AS municipio,
         COALESCE(hr.estado, 'PENDIENTE') AS estatus,
         c.tratamiento AS "respuestaContrareferencia"
       FROM hojas_referencia hr
-      LEFT JOIN contrareferencias c hr.id = c.hoja_referencia_id
+      LEFT JOIN parteras p ON hr.partera_id = p.id
+      LEFT JOIN contrareferencias c ON hr.id = c.hoja_referencia_id
       ORDER BY hr.id DESC
     `;
     const result = await pool.query(query);
     res.status(200).json(result.rows);
   } catch (error: any) {
+    console.error('Error al obtener referencias admin:', error);
     res.status(200).json([]);
   }
 };
