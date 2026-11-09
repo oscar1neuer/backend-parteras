@@ -364,7 +364,10 @@ app.post('/api/v1/admin/usuarios-sso', async (req: any, res: any) => {
   }
 });
 
-app.get('/api/v1/admin/parteras', async (_req: any, res: any) => {
+// ==========================================
+// CONTROLADORES DE PARTERAS (AMBAS RUTAS SOPORTADAS)
+// ==========================================
+const handlerGetParteras = async (_req: any, res: any) => {
   try {
     const result = await pool.query('SELECT * FROM parteras ORDER BY creado_en DESC');
     res.status(200).json(result.rows);
@@ -372,7 +375,10 @@ app.get('/api/v1/admin/parteras', async (_req: any, res: any) => {
     console.error('Error al listar parteras:', error);
     res.status(500).json({ error: 'Error al consultar padrón de parteras', detalleTecnico: error.message });
   }
-});
+};
+
+app.get('/admin/parteras', handlerGetParteras);
+app.get('/api/v1/admin/parteras', handlerGetParteras);
 
 app.post('/api/v1/admin/parteras', async (req: any, res: any) => {
   try {
