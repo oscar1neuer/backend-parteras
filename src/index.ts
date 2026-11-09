@@ -365,11 +365,11 @@ app.post('/api/v1/admin/usuarios-sso', async (req: any, res: any) => {
 });
 
 // ==========================================
-// CONTROLADORES DE PARTERAS (AMBAS RUTAS SOPORTADAS)
+// CONTROLADORES DE PARTERAS (CORREGIDO: ORDER BY id DESC)
 // ==========================================
 const handlerGetParteras = async (_req: any, res: any) => {
   try {
-    const result = await pool.query('SELECT * FROM parteras ORDER BY creado_en DESC');
+    const result = await pool.query('SELECT * FROM parteras ORDER BY id DESC');
     res.status(200).json(result.rows);
   } catch (error: any) {
     console.error('Error al listar parteras:', error);
