@@ -79,7 +79,6 @@ app.post('/api/v1/referencias', async (req: any, res: any) => {
     const finalMunicipio = municipio || usuaria?.municipio;
     const finalMotivos = motivos || motivosReferencia;
 
-    // Consulta adaptada sin columnas de fecha para evitar errores en Neon
     const query = `
       INSERT INTO hojas_referencia (
         partera_id, centro_salud, nombre_usuaria, edad, sexo, 
@@ -174,7 +173,7 @@ app.post('/api/v1/referencias/:id/contrareferencia', async (req: any, res: any) 
 // ==========================================
 app.post('/api/v1/calendario-nino', async (req: any, res: any) => {
   try {
-    const { parteraId, datosNino, estadoNutricional, tipoLactancia, canalizaciones, cierreAdministrativo } = req.body;
+    const { parteraId, datosNino, controlNutricional, signosAlarma, cierreAdministrativo } = req.body;
 
     const query = `
       INSERT INTO calendario_nino (
@@ -185,29 +184,30 @@ app.post('/api/v1/calendario-nino', async (req: any, res: any) => {
       RETURNING *;
     `;
 
-    const idParteraValido = (typeof parteraId === 'number' || !isNaN(Number(parteraId))) ? Number(parteraId) : 1;
+    const idParteraValido = parteraId && parteraId !== 'DEFAULT-PARTERA-UUID' ? parteraId : null;
 
     const values = [
       idParteraValido,
-      datosNino.nombreNino,
-      datosNino.edadMeses,
-      datosNino.nombreMadre,
-      datosNino.localidad,
-      datosNino.municipio,
-      datosNino.fechaAtencion,
-      estadoNutricional,
-      tipoLactancia,
-      JSON.stringify(canalizaciones),
-      cierreAdministrativo.mesInformado,
-      cierreAdministrativo.nombreSupervisor,
-      cierreAdministrativo.centroSaludAdscripcion,
-      cierreAdministrativo.huellaFirmada,
-      cierreAdministrativo.esCopiaCentroSalud
+      datosNino?.nombreNino,
+      datosNino?.edadMeses || 0,
+      datosNino?.nombreMadre || '',
+      datosNino?.localidad || '',
+      datosNino?.municipio || '',
+      datosNino?.fechaConsulta || new Date(),
+      controlNutricional?.muacNino || 'VERDE',
+      JSON.stringify(controlNutricional?.vacunasAplicadas || []),
+      JSON.stringify(signosAlarma?.alarmas || []),
+      cierreAdministrativo?.mesInformado || '',
+      cierreAdministrativo?.nombreSupervisor || '',
+      cierreAdministrativo?.centroSaludAdscripcion || '',
+      cierreAdministrativo?.huellaFirmada ?? true,
+      datosNino?.esCopiaCentroSalud ?? false
     ];
 
     const result = await pool.query(query, values);
     res.status(201).json({
-      mensaje: 'Registro de calendario del niño guardado con éxito',
+      success: true,
+      message: 'Registro de calendario del niño guardado con éxito',
       registro: result.rows[0]
     });
   } catch (error: any) {
@@ -233,7 +233,7 @@ app.post('/api/v1/calendario-mujer', async (req: any, res: any) => {
     `;
 
     const values = [
-      parteraId || null,
+      parteraId && parteraId !== 'DEFAULT-PARTERA-UUID' ? parteraId : null,
       datosUsuaria?.nombreMujer,
       datosUsuaria?.edad,
       datosUsuaria?.fechaConsulta,
