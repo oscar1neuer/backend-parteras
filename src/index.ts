@@ -79,13 +79,13 @@ app.post('/api/v1/referencias', async (req: any, res: any) => {
     const finalMunicipio = municipio || usuaria?.municipio;
     const finalMotivos = motivos || motivosReferencia;
 
-    // Consulta adaptada utilizando fecha_referencia que existe en tu tabla hojas_referencia
+    // Consulta adaptada sin columnas de fecha para evitar errores en Neon
     const query = `
       INSERT INTO hojas_referencia (
         partera_id, centro_salud, nombre_usuaria, edad, sexo, 
-        fecha_referencia, localidad_usuaria, municipio_usuaria, motivos_referencia, estado
-      ) VALUES ($1, $2, $3, $4, $5, NOW(), $6, $7, $8::jsonb, 'PENDIENTE')
-      RETURNING id, estado, fecha_referencia;
+        localidad_usuaria, municipio_usuaria, motivos_referencia, estado
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, 'PENDIENTE')
+      RETURNING id, estado;
     `;
 
     const values = [
@@ -103,8 +103,8 @@ app.post('/api/v1/referencias', async (req: any, res: any) => {
 
     if (contrareferencia && contrareferencia.activa) {
       await pool.query(
-        `INSERT INTO contrareferencias (hoja_referencia_id, medico_nombre, diagnostico, tratamiento, observaciones_partera, fecha_respuesta)
-         VALUES ($1, $2, $3, $4, $5, NOW())`,
+        `INSERT INTO contrareferencias (hoja_referencia_id, medico_nombre, diagnostico, tratamiento, observaciones_partera)
+         VALUES ($1, $2, $3, $4, $5)`,
         [
           result.rows[0].id,
           contrareferencia.nombreMedico || 'Médico Tratante',
@@ -133,7 +133,7 @@ app.get('/api/v1/referencias', async (_req: any, res: any) => {
       SELECT hr.*, c.medico_nombre, c.diagnostico, c.tratamiento, c.observaciones_partera 
       FROM hojas_referencia hr
       LEFT JOIN contrareferencias c ON hr.id = c.hoja_referencia_id
-      ORDER BY hr.fecha_referencia DESC
+      ORDER BY hr.id DESC
     `;
     const result = await pool.query(query);
     res.status(200).json(result.rows);
@@ -887,7 +887,7 @@ const handlerGetReferenciasAdmin = async (_req: any, res: any) => {
         c.tratamiento AS "respuestaContrareferencia"
       FROM hojas_referencia hr
       LEFT JOIN contrareferencias c ON hr.id = c.hoja_referencia_id
-      ORDER BY hr.fecha_referencia DESC
+      ORDER BY hr.id DESC
     `;
     const result = await pool.query(query);
     res.status(200).json(result.rows);
@@ -993,7 +993,7 @@ const handlerGetClues = async (_req: any, res: any) => {
     const result = await pool.query('SELECT * FROM unidades_medicas ORDER BY nombre_unidad ASC');
     res.status(200).json(result.rows);
   } catch (error: any) {
-    res.status(500).json([]);
+    res.status(200).json([]);
   }
 };
 
